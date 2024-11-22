@@ -213,20 +213,12 @@ impl Bom {
             let name: CString = c"VIndex.index".into();
             trees.push_back((name, v_index.index));
         }
-        let size64_paths = {
-            let name = SIZE_64;
-            if let Some(index) = named_blocks.remove(name) {
-                let tree = Tree::read(blocks.slice(index, &file)?)?;
-                eprintln!("tree {:?} {:?}", name, tree);
-                let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
-                Some(paths)
-            } else {
-                None
-            }
-        };
         // block id -> file size
         let mut file_size_64 = HashMap::new();
-        if let Some(paths) = size64_paths {
+        if let Some(index) = named_blocks.remove(SIZE_64) {
+            let tree = Tree::read(blocks.slice(index, &file)?)?;
+            eprintln!("tree {:?} {:?}", SIZE_64, tree);
+            let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
             eprintln!("size64 paths {:?}", paths);
             for (index0, index1) in paths.indices.into_iter() {
                 let block_bytes = blocks.slice(index0, &file)?;
@@ -234,8 +226,36 @@ impl Bom {
                 eprintln!("block {}: {:?}", index0, block_bytes);
                 let block_bytes = blocks.slice(index1, &file)?;
                 eprintln!("block {}: {:?}", index1, block_bytes);
-                let index = u32_read_v2(&block_bytes[..])?;
-                file_size_64.insert(index, file_size);
+                let metadata_index = u32_read_v2(&block_bytes[..])?;
+                file_size_64.insert(metadata_index, file_size);
+            }
+        }
+        if let Some(index) = named_blocks.remove(HL_INDEX) {
+            let tree = Tree::read(blocks.slice(index, &file)?)?;
+            eprintln!("tree {:?} {:?}", HL_INDEX, tree);
+            let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
+            eprintln!("hl-index paths {:?}", paths);
+            for (index0, index1) in paths.indices.into_iter() {
+                let block_bytes = blocks.slice(index0, &file)?;
+                let id = u32_read(&block_bytes[..4]);
+                // id points to a tree
+                let tree = Tree::read(blocks.slice(id, &file)?)?;
+                eprintln!("tree {:?} {:?}", "hard-link", tree);
+                let block_bytes = blocks.slice(index1, &file)?;
+                let metadata_index = u32_read(&block_bytes[0..4]);
+                let index = tree.child;
+                let path = Paths::read(blocks.slice(index, &file)?)?;
+                debug_assert!(path.is_leaf);
+                eprintln!("read index {} paths {:?} hard-link", index, path);
+                for (index0, index1) in path.indices.into_iter() {
+                    let block_bytes = blocks.slice(index0, &file)?;
+                    eprintln!("block {}: {:?}", index0, block_bytes);
+                    debug_assert!(block_bytes.is_empty());
+                    let block_bytes = blocks.slice(index1, &file)?;
+                    let name = CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
+                    let name = OsStr::from_bytes(name.to_bytes());
+                    eprintln!("hard-link {:?} -> {}", name.to_str(), metadata_index);
+                }
             }
         }
         let mut paths = VecDeque::new();
@@ -257,7 +277,6 @@ impl Bom {
         // id -> data
         let mut nodes = HashMap::new();
         let mut visited = HashSet::new();
-        let mut hard_link_paths = VecDeque::new();
         while let Some((name, index)) = paths.pop_front() {
             if !visited.insert(index) {
                 //eprintln!("loop {}", index);
@@ -282,21 +301,6 @@ impl Bom {
                     let block_bytes = blocks.slice(index0, &file)?;
                     eprintln!("block {}: {:?}", index0, block_bytes);
                     if block_bytes.len() == 0 {
-                        None
-                    } else if block_bytes.len() == 4 {
-                        let id = u32_read(&block_bytes[0..4]);
-                        // id points to a tree
-                        let tree = match Tree::read(blocks.slice(id, &file)?) {
-                            Ok(tree) => tree,
-                            Err(e) => {
-                                eprintln!("failed to parse {:?} as tree: {}", name, e);
-                                continue;
-                            }
-                        };
-                        eprintln!("tree {:?} {:?}", "hard-link", tree);
-                        let block_bytes = blocks.slice(index1, &file)?;
-                        let target = u32_read(&block_bytes[0..4]);
-                        hard_link_paths.push_back((target, tree.child));
                         None
                     } else {
                         let id = u32_read(&block_bytes[0..4]);
@@ -329,22 +333,17 @@ impl Bom {
                     let block_bytes = blocks.slice(index1, &file)?;
                     eprintln!("block {}: {:?}", index1, block_bytes);
                     let parent = u32_read(&block_bytes[0..4]);
-                    if block_bytes.len() == 4 {
-                        eprintln!("hard link {:?}", parent);
-                        // TODO hard link
-                    } else {
-                        let name =
-                            CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
-                        let name = OsStr::from_bytes(name.to_bytes());
-                        if !path.is_leaf {
-                            eprintln!("parent {} name {:?}", parent, name.to_str());
-                        }
-                        //eprintln!("file parent {} name {}", parent, name,);
-                        if let Some(mut child) = child {
-                            child.name = name.into();
-                            child.parent = parent;
-                            nodes.insert(child.id, child);
-                        }
+                    let name =
+                        CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
+                    let name = OsStr::from_bytes(name.to_bytes());
+                    if !path.is_leaf {
+                        eprintln!("parent {} name {:?}", parent, name.to_str());
+                    }
+                    //eprintln!("file parent {} name {}", parent, name,);
+                    if let Some(mut child) = child {
+                        child.name = name.into();
+                        child.parent = parent;
+                        nodes.insert(child.id, child);
                     }
                 }
             }
@@ -353,20 +352,6 @@ impl Bom {
             }
             if path.backward != 0 {
                 paths.push_back((name.clone(), path.backward));
-            }
-        }
-        while let Some((target, index)) = hard_link_paths.pop_front() {
-            let path = Paths::read(blocks.slice(index, &file)?)?;
-            debug_assert!(path.is_leaf);
-            eprintln!("read index {} paths {:?} hard-link", index, path);
-            for (index0, index1) in path.indices.into_iter() {
-                let block_bytes = blocks.slice(index0, &file)?;
-                eprintln!("block {}: {:?}", index0, block_bytes);
-                debug_assert!(block_bytes.is_empty());
-                let block_bytes = blocks.slice(index1, &file)?;
-                let name = CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
-                let name = OsStr::from_bytes(name.to_bytes());
-                eprintln!("hard-link {:?} -> {}", name.to_str(), target);
             }
         }
         #[cfg(test)]
@@ -1270,16 +1255,18 @@ pub trait BigEndianIo {
 
 const BOM_MAGIC: [u8; 8] = *b"BOMStore";
 const TREE_MAGIC: [u8; 4] = *b"tree";
-const V_INDEX: &CStr = c"VIndex";
-const HL_INDEX: &CStr = c"HLIndex";
-const SIZE_64: &CStr = c"Size64";
-const BOM_INFO: &CStr = c"BomInfo";
-const PATHS: &CStr = c"Paths";
 const HEADER_LEN: usize = 512;
 const REAL_HEADER_LEN: usize = 32;
 const HEADER_PADDING: usize = HEADER_LEN - REAL_HEADER_LEN;
 const VERSION: u32 = 1;
 const MODE_MASK: u16 = 0o7777;
+
+// Named blocks.
+const V_INDEX: &CStr = c"VIndex";
+const HL_INDEX: &CStr = c"HLIndex";
+const SIZE_64: &CStr = c"Size64";
+const BOM_INFO: &CStr = c"BomInfo";
+const PATHS: &CStr = c"Paths";
 
 #[cfg(test)]
 mod tests {
@@ -1301,10 +1288,10 @@ mod tests {
             //"char.bom",
             //"dir.bom",
             //"file.bom",
-            //"hardlink.bom",
+            "hardlink.bom",
             //"symlink.bom",
             //"exe.bom",
-            "size64.bom",
+            //"size64.bom",
         ] {
             Bom::read(File::open(filename).unwrap()).unwrap();
         }
