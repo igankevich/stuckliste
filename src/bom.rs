@@ -5,6 +5,7 @@ use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::fs::File;
 use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
@@ -20,6 +21,7 @@ use std::path::PathBuf;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
+use crate::CrcReader;
 use crate::FileType;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
@@ -171,20 +173,20 @@ impl Bom {
         let mut file = Vec::new();
         reader.read_to_end(&mut file)?;
         let header = Header::read(&file[..HEADER_LEN])?;
-        eprintln!("header {header:?}");
+        eprintln!("{header:?}");
         let index_offset = header.index_offset as usize;
         let index_len = header.index_len as usize;
         let vars_offset = header.vars_offset as usize;
         let vars_len = header.vars_len as usize;
         let mut vars = Vars::read(&file[vars_offset..(vars_offset + vars_len)])?;
-        let blocks = Blocks::read(&file[index_offset..(index_offset + index_len)])?;
+        let mut blocks = Blocks::read(&file[index_offset..(index_offset + index_len)])?;
         {
             let name = BOM_INFO;
             let index = vars
                 .remove(name)
                 .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
             let bom_info = BomInfo::read(blocks.slice(index, &file)?)?;
-            eprintln!("bom info {:?}", bom_info);
+            eprintln!("{:?}", bom_info);
         }
         let mut trees = VecDeque::new();
         {
@@ -192,9 +194,7 @@ impl Bom {
             let index = vars
                 .remove(name)
                 .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
-            eprintln!("read vindex index {}", index);
             let v_index = VIndex::read(blocks.slice(index, &file)?)?;
-            eprintln!("v index {:?}", v_index);
             let name: CString = c"VIndex.index".into();
             trees.push_back((name, v_index.index));
         }
@@ -213,12 +213,13 @@ impl Bom {
                 }
             };
             eprintln!("tree {:?} {:?}", name.to_str(), tree);
-            paths.push_back(tree.child);
+            paths.push_back((name, tree.child));
         }
         // id -> data
         let mut nodes = HashMap::new();
         let mut visited = HashSet::new();
-        while let Some(index) = paths.pop_front() {
+        let mut hard_link_paths = VecDeque::new();
+        while let Some((name, index)) = paths.pop_front() {
             if !visited.insert(index) {
                 //eprintln!("loop {}", index);
                 continue;
@@ -230,55 +231,96 @@ impl Bom {
                     index, path.forward, path.backward, path.indices
                 );
             }
-            eprintln!("read index {} paths {:?}", index, path);
+            eprintln!("read index {} paths {:?} name {:?}", index, path, name);
             // is_leaf == 0 means count == 1?
             for (index0, index1) in path.indices.into_iter() {
                 let child = if !path.is_leaf {
-                    paths.push_back(index0);
+                    paths.push_back((name.clone(), index0));
                     // index1 appears to be irrelevant here
                     // (equals to index1 of the last file in the referenced Paths)
                     None
                 } else {
                     let block_bytes = blocks.slice(index0, &file)?;
-                    let id = u32_read(&block_bytes[0..4]);
-                    eprintln!("id {}", id);
-                    let index = u32_read(&block_bytes[4..8]);
-                    let block_bytes = blocks.slice(index, &file)?;
-                    let metadata = Metadata::read(block_bytes)?;
-                    let node = Node {
-                        id,
-                        metadata,
-                        parent: 0,
-                        name: Default::default(),
-                    };
-                    Some(node)
+                    eprintln!("block {}: {:?}", index0, block_bytes);
+                    if block_bytes.len() == 0 {
+                        None
+                    } else if block_bytes.len() == 4 {
+                        let id = u32_read(&block_bytes[0..4]);
+                        // id points to a tree
+                        let tree = match Tree::read(blocks.slice(id, &file)?) {
+                            Ok(tree) => tree,
+                            Err(e) => {
+                                eprintln!("failed to parse {:?} as tree: {}", name, e);
+                                continue;
+                            }
+                        };
+                        eprintln!("tree {:?} {:?}", "hard-link", tree);
+                        let block_bytes = blocks.slice(index1, &file)?;
+                        let target = u32_read(&block_bytes[0..4]);
+                        hard_link_paths.push_back((target, tree.child));
+                        None
+                    } else {
+                        let id = u32_read(&block_bytes[0..4]);
+                        eprintln!("id {}", id);
+                        let index = u32_read(&block_bytes[4..8]);
+                        let block_bytes = blocks.slice(index, &file)?;
+                        let metadata = Metadata::read(block_bytes)?;
+                        let node = Node {
+                            id,
+                            metadata,
+                            parent: 0,
+                            name: Default::default(),
+                        };
+                        Some(node)
+                    }
                 };
-                //eprintln!("path {} {}", index0, index1);
                 {
                     let block_bytes = blocks.slice(index1, &file)?;
+                    eprintln!("block {}: {:?}", index1, block_bytes);
                     let parent = u32_read(&block_bytes[0..4]);
-                    let name =
-                        CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
-                    let name = OsStr::from_bytes(name.to_bytes());
-                    if !path.is_leaf {
-                        eprintln!("parent {} name {:?}", parent, name.to_str());
-                    }
-                    //eprintln!("file parent {} name {}", parent, name,);
-                    if let Some(mut child) = child {
-                        child.name = name.into();
-                        child.parent = parent;
-                        nodes.insert(child.id, child);
+                    if block_bytes.len() == 4 {
+                        eprintln!("hard link {:?}", parent);
+                        // TODO hard link
+                    } else {
+                        let name =
+                            CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
+                        let name = OsStr::from_bytes(name.to_bytes());
+                        if !path.is_leaf {
+                            eprintln!("parent {} name {:?}", parent, name.to_str());
+                        }
+                        //eprintln!("file parent {} name {}", parent, name,);
+                        if let Some(mut child) = child {
+                            child.name = name.into();
+                            child.parent = parent;
+                            nodes.insert(child.id, child);
+                        }
                     }
                 }
             }
             if path.forward != 0 {
-                paths.push_back(path.forward);
+                paths.push_back((name.clone(), path.forward));
             }
             if path.backward != 0 {
-                paths.push_back(path.backward);
+                paths.push_back((name.clone(), path.backward));
             }
         }
+        while let Some((target, index)) = hard_link_paths.pop_front() {
+            let path = Paths::read(blocks.slice(index, &file)?)?;
+            debug_assert!(path.is_leaf);
+            eprintln!("read index {} paths {:?} hard-link", index, path);
+            for (index0, index1) in path.indices.into_iter() {
+                let block_bytes = blocks.slice(index0, &file)?;
+                eprintln!("block {}: {:?}", index0, block_bytes);
+                debug_assert!(block_bytes.is_empty());
+                let block_bytes = blocks.slice(index1, &file)?;
+                let name = CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
+                let name = OsStr::from_bytes(name.to_bytes());
+                eprintln!("hard-link {:?} -> {}", name.to_str(), target);
+            }
+        }
+        blocks.print_unread_blocks();
         let nodes = Nodes { nodes };
+        eprintln!("nodes {:#?}", nodes);
         let paths = nodes.to_paths()?;
         for (path, metadata) in paths.iter() {
             eprintln!("read path {:?} metadata {:?}", path, metadata);
@@ -316,9 +358,6 @@ impl BigEndianIo for Header {
         let index_len = u32_read(&file[20..24]);
         let vars_offset = u32_read(&file[24..28]);
         let vars_len = u32_read(&file[28..32]);
-        eprintln!("vars offset {} len {}", vars_offset, vars_len);
-        eprintln!("index offset {} len {}", index_offset, index_len);
-        eprintln!("num non null blocks {}", num_non_null_blocks);
         Ok(Self {
             num_non_null_blocks,
             index_offset,
@@ -409,6 +448,7 @@ impl DerefMut for Vars {
 struct Blocks {
     blocks: Vec<Block>,
     free_blocks: Vec<Block>,
+    unread_blocks: HashSet<usize>,
 }
 
 impl Blocks {
@@ -418,16 +458,22 @@ impl Blocks {
             blocks: vec![Block::null()],
             // write two empty blocks at the end
             free_blocks: vec![Block::null(), Block::null()],
+            unread_blocks: Default::default(),
         }
     }
 
-    fn slice<'a>(&self, index: u32, file: &'a [u8]) -> Result<&'a [u8], Error> {
+    fn slice<'a>(&mut self, index: u32, file: &'a [u8]) -> Result<&'a [u8], Error> {
         let block = self
             .blocks
             .get(index as usize)
             .ok_or_else(|| Error::other("invalid block index"))?;
-        //eprintln!("read block index {} block {:?}", index, block);
-        Ok(block.slice(file))
+        self.unread_blocks.remove(&(index as usize));
+        let slice = block.slice(file);
+        eprintln!(
+            "read block index {} block {:?} slice {:?}",
+            index, block, slice
+        );
+        Ok(slice)
     }
 
     fn num_non_null_blocks(&self) -> usize {
@@ -450,6 +496,12 @@ impl Blocks {
         let index = self.blocks.len();
         index as u32
     }
+
+    fn print_unread_blocks(&self) {
+        for i in self.unread_blocks.iter() {
+            eprintln!("unread block {}: {:?}", i, self.blocks[*i]);
+        }
+    }
 }
 
 impl BigEndianIo for Blocks {
@@ -466,9 +518,15 @@ impl BigEndianIo for Blocks {
             let block = Block::read(reader.by_ref())?;
             free_blocks.push(block);
         }
+        let unread_blocks = blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, block)| if block.is_null() { None } else { Some(i) })
+            .collect::<HashSet<_>>();
         Ok(Self {
             blocks,
             free_blocks,
+            unread_blocks,
         })
     }
 
@@ -843,6 +901,9 @@ impl Nodes {
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
             let metadata = std::fs::metadata(entry.path())?;
+            let mut metadata: Metadata = metadata.try_into()?;
+            let crc_reader = CrcReader::new(File::open(entry.path())?);
+            metadata.checksum = crc_reader.digest()?;
             let node = Node {
                 id,
                 parent: match dirname {
@@ -853,7 +914,7 @@ impl Nodes {
                     Some(s) => s.into(),
                     None => relative_path.clone().into(),
                 },
-                metadata: metadata.try_into()?,
+                metadata,
             };
             nodes.insert(relative_path, node);
             id += 1;
@@ -881,6 +942,7 @@ pub struct Metadata {
     pub gid: u32,
     pub mtime: u32,
     pub size: u32,
+    pub checksum: u32,
     pub link_target: PathBuf,
 }
 
@@ -895,7 +957,8 @@ impl BigEndianIo for Metadata {
         let mtime = u32_read_v2(reader.by_ref())?;
         let size = u32_read_v2(reader.by_ref())?;
         let _x1 = u8_read(reader.by_ref())?;
-        let _checksum_or_dev_type = u32_read_v2(reader.by_ref())?;
+        let checksum = u32_read_v2(reader.by_ref())?;
+        eprintln!("x0 {_x0} arch {_arch} x1 {_x1} checksum {checksum:#x}");
         let link_target_len = u32_read_v2(reader.by_ref())?;
         debug_assert!(
             (link_target_len == 0 && kind != FileType::Link)
@@ -905,7 +968,6 @@ impl BigEndianIo for Metadata {
             link_target_len
         );
         let link_target: PathBuf = if link_target_len != 0 {
-            eprintln!("link target len {}", link_target_len);
             let mut target = vec![0_u8; link_target_len as usize];
             reader.read_exact(&mut target[..])?;
             OsString::from_vec(target).into()
@@ -919,6 +981,7 @@ impl BigEndianIo for Metadata {
             gid,
             mtime,
             size,
+            checksum,
             link_target,
         })
     }
@@ -933,7 +996,7 @@ impl BigEndianIo for Metadata {
         u32_write(writer.by_ref(), self.mtime)?;
         u32_write(writer.by_ref(), self.size)?;
         u8_write(writer.by_ref(), 1_u8)?;
-        u32_write(writer.by_ref(), 0_u32)?;
+        u32_write(writer.by_ref(), self.checksum)?;
         let link_bytes = self.link_target.as_os_str().as_bytes();
         u32_write(writer.by_ref(), link_bytes.len() as u32)?;
         writer.write_all(link_bytes)?;
@@ -955,6 +1018,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
                 .size()
                 .try_into()
                 .map_err(|_| Error::other("files larger than 4 GiB are not supported"))?,
+            checksum: 0,
             link_target: Default::default(),
         })
     }
@@ -1035,7 +1099,9 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        Bom::read(File::open("symlink.bom").unwrap()).unwrap();
+        Bom::read(File::open("hardlink.bom").unwrap()).unwrap();
+        let crc_reader = CrcReader::new(File::open("file").unwrap());
+        eprintln!("checksum {}", crc_reader.digest().unwrap());
         //Header::read(File::open("macos/src.bom").unwrap()).unwrap();
     }
 
@@ -1086,6 +1152,7 @@ mod tests {
                 gid: u.arbitrary()?,
                 mtime: u.arbitrary()?,
                 size: u.arbitrary()?,
+                checksum: u.arbitrary()?,
                 // TODO
                 link_target: u.arbitrary()?,
             })
