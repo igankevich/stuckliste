@@ -265,6 +265,7 @@ impl Bom {
                         let index = u32_read(&block_bytes[4..8]);
                         let block_bytes = blocks.slice(index, &file)?;
                         let metadata = Metadata::read(block_bytes)?;
+                        eprintln!("kind {:?} checksum {}", metadata.kind, metadata.checksum);
                         let node = Node {
                             id,
                             metadata,
@@ -318,6 +319,7 @@ impl Bom {
                 eprintln!("hard-link {:?} -> {}", name.to_str(), target);
             }
         }
+        #[cfg(test)]
         blocks.print_unread_blocks();
         let nodes = Nodes { nodes };
         eprintln!("nodes {:#?}", nodes);
@@ -444,10 +446,11 @@ impl DerefMut for Vars {
 }
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 struct Blocks {
     blocks: Vec<Block>,
     free_blocks: Vec<Block>,
+    #[cfg(test)]
     unread_blocks: HashSet<usize>,
 }
 
@@ -458,6 +461,7 @@ impl Blocks {
             blocks: vec![Block::null()],
             // write two empty blocks at the end
             free_blocks: vec![Block::null(), Block::null()],
+            #[cfg(test)]
             unread_blocks: Default::default(),
         }
     }
@@ -467,6 +471,7 @@ impl Blocks {
             .blocks
             .get(index as usize)
             .ok_or_else(|| Error::other("invalid block index"))?;
+        #[cfg(test)]
         self.unread_blocks.remove(&(index as usize));
         let slice = block.slice(file);
         eprintln!(
@@ -497,12 +502,23 @@ impl Blocks {
         index as u32
     }
 
+    #[cfg(test)]
     fn print_unread_blocks(&self) {
         for i in self.unread_blocks.iter() {
             eprintln!("unread block {}: {:?}", i, self.blocks[*i]);
         }
     }
 }
+
+#[cfg(test)]
+impl PartialEq for Blocks {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.blocks, &self.free_blocks).eq(&(&other.blocks, &other.free_blocks))
+    }
+}
+
+#[cfg(test)]
+impl Eq for Blocks {}
 
 impl BigEndianIo for Blocks {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
@@ -897,13 +913,16 @@ impl Nodes {
             if entry_path == Path::new("") {
                 continue;
             }
+            eprintln!("entry {:?}", entry_path);
             let relative_path = Path::new(".").join(entry_path);
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
             let metadata = std::fs::metadata(entry.path())?;
             let mut metadata: Metadata = metadata.try_into()?;
-            let crc_reader = CrcReader::new(File::open(entry.path())?);
-            metadata.checksum = crc_reader.digest()?;
+            if metadata.kind.is_checksum() {
+                let crc_reader = CrcReader::new(File::open(entry.path())?);
+                metadata.checksum = crc_reader.digest()?;
+            }
             let node = Node {
                 id,
                 parent: match dirname {
@@ -933,6 +952,12 @@ struct Node {
     name: OsString,
 }
 
+/*
+Device len 35
+Directory len 31
+File len 35
+Link len 45
+*/
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Metadata {
@@ -961,8 +986,7 @@ impl BigEndianIo for Metadata {
         eprintln!("x0 {_x0} arch {_arch} x1 {_x1} checksum {checksum:#x}");
         let link_target_len = u32_read_v2(reader.by_ref())?;
         debug_assert!(
-            (link_target_len == 0 && kind != FileType::Link)
-                || (link_target_len != 0 && kind == FileType::Link),
+            link_target_len == 0 && kind != FileType::Link || kind == FileType::Link,
             "kind = {:?}, link_target_len = {}",
             kind,
             link_target_len
@@ -1099,9 +1123,18 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        Bom::read(File::open("hardlink.bom").unwrap()).unwrap();
-        let crc_reader = CrcReader::new(File::open("file").unwrap());
-        eprintln!("checksum {}", crc_reader.digest().unwrap());
+        for filename in [
+            "block.bom",
+            "char.bom",
+            "dir.bom",
+            "file.bom",
+            "hardlink.bom",
+            "symlink.bom",
+        ] {
+            Bom::read(File::open(filename).unwrap()).unwrap();
+        }
+        //let crc_reader = CrcReader::new(File::open("file").unwrap());
+        //eprintln!("checksum {}", crc_reader.digest().unwrap());
         //Header::read(File::open("macos/src.bom").unwrap()).unwrap();
     }
 
@@ -1145,39 +1178,40 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for Metadata {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let kind: FileType = u.arbitrary()?;
             Ok(Self {
-                kind: u.arbitrary()?,
+                kind,
                 mode: u.arbitrary::<u16>()? & MODE_MASK,
                 uid: u.arbitrary()?,
                 gid: u.arbitrary()?,
                 mtime: u.arbitrary()?,
                 size: u.arbitrary()?,
                 checksum: u.arbitrary()?,
-                // TODO
-                link_target: u.arbitrary()?,
+                link_target: if kind == FileType::Link {
+                    u.arbitrary()?
+                } else {
+                    Default::default()
+                },
             })
         }
     }
 
     impl<'a> Arbitrary<'a> for Nodes {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let directory: DirectoryOfFiles = u.arbitrary()?;
+            use cpio_test::FileType::*;
+            let directory = DirectoryOfFiles::new(
+                &[
+                    Regular,
+                    Directory,
+                    BlockDevice,
+                    CharDevice,
+                    Symlink,
+                    HardLink,
+                ],
+                u,
+            )?;
             let nodes = Nodes::from_directory(directory.path()).unwrap();
             Ok(nodes)
-            /*
-            let mut nodes: Vec<Node> = u.arbitrary()?;
-            if !nodes.is_empty() {
-                nodes[0].parent = 0;
-            }
-            // generate parents
-            for i in 1..nodes.len() {
-                // until i-1 to prevent the loops
-                let j = u.int_in_range(0..=(i - 1))?;
-                nodes[i].parent = nodes[j].id;
-            }
-            let nodes = nodes.into_iter().map(|node| (node.id, node)).collect();
-            Ok(Self { nodes })
-                */
         }
     }
 }

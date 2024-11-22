@@ -15,6 +15,13 @@ pub enum FileType {
     Device = 4,
 }
 
+impl FileType {
+    pub(crate) fn is_checksum(&self) -> bool {
+        use FileType::*;
+        matches!(self, File | Link)
+    }
+}
+
 impl TryFrom<u8> for FileType {
     type Error = Error;
     fn try_from(other: u8) -> Result<Self, Self::Error> {
