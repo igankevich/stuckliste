@@ -142,6 +142,7 @@ dependencies = [
  "arbitrary",
  "arbtest",
  "cpio-test",
+ "libc",
  "normalize-path",
  "walkdir",
 ]
