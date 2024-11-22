@@ -61,14 +61,7 @@ impl Bom {
             let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
             named_blocks.insert(HL_INDEX.into(), i);
         }
-        // size 64
-        {
-            let paths = Paths::null();
-            let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
-            let tree = Tree::null(i);
-            let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
-            named_blocks.insert(SIZE_64.into(), i);
-        }
+        let mut file_size_64 = HashMap::new();
         // paths
         let num_paths = {
             let edges = self.nodes.edges();
@@ -83,6 +76,9 @@ impl Bom {
                     // node metadata
                     let i = blocks
                         .write_block(writer.by_ref(), |writer| node.metadata.write(writer))?;
+                    if node.metadata.size > u32::MAX as u64 {
+                        file_size_64.insert(i, node.metadata.size);
+                    }
                     // node id -> index mapping
                     let index0 = blocks.write_block(writer.by_ref(), |writer| {
                         u32_write(writer.by_ref(), node.id)?;
@@ -139,6 +135,24 @@ impl Bom {
             }
             num_paths
         };
+        // size 64
+        {
+            let mut indices = Vec::new();
+            eprintln!("write file_size_64 {:#?}", file_size_64);
+            for (metadata_index, file_size) in file_size_64.into_iter() {
+                let i =
+                    blocks.write_block(writer.by_ref(), |writer| u64_write(writer, file_size))?;
+                let j = blocks
+                    .write_block(writer.by_ref(), |writer| u32_write(writer, metadata_index))?;
+                indices.push((i, j));
+            }
+            let num_paths = indices.len() as u32;
+            let paths = Paths::from_indices(indices);
+            let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+            let tree = Tree::new(i, num_paths);
+            let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+            named_blocks.insert(SIZE_64.into(), i);
+        }
         // bom info
         {
             let bom_info = BomInfo {
@@ -177,8 +191,9 @@ impl Bom {
         let mut file = Vec::new();
         reader.read_to_end(&mut file)?;
         let header = Header::read(&file[..HEADER_LEN])?;
-        eprintln!("{header:?}");
+        eprintln!("{header:#?}");
         let mut named_blocks = NamedBlocks::read(header.named_blocks.slice(&file))?;
+        eprintln!("{:#?}", named_blocks);
         let mut blocks = Blocks::read(header.index.slice(&file))?;
         {
             let name = BOM_INFO;
@@ -198,9 +213,33 @@ impl Bom {
             let name: CString = c"VIndex.index".into();
             trees.push_back((name, v_index.index));
         }
+        let size64_paths = {
+            let name = SIZE_64;
+            if let Some(index) = named_blocks.remove(name) {
+                let tree = Tree::read(blocks.slice(index, &file)?)?;
+                eprintln!("tree {:?} {:?}", name, tree);
+                let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
+                Some(paths)
+            } else {
+                None
+            }
+        };
+        // block id -> file size
+        let mut file_size_64 = HashMap::new();
+        if let Some(paths) = size64_paths {
+            eprintln!("size64 paths {:?}", paths);
+            for (index0, index1) in paths.indices.into_iter() {
+                let block_bytes = blocks.slice(index0, &file)?;
+                let file_size = u64_read(&block_bytes[..])?;
+                eprintln!("block {}: {:?}", index0, block_bytes);
+                let block_bytes = blocks.slice(index1, &file)?;
+                eprintln!("block {}: {:?}", index1, block_bytes);
+                let index = u32_read_v2(&block_bytes[..])?;
+                file_size_64.insert(index, file_size);
+            }
+        }
         let mut paths = VecDeque::new();
         let named_blocks = named_blocks.named_blocks;
-        eprintln!("named_blocks {:?}", named_blocks);
         for (name, index) in named_blocks.into_iter() {
             trees.push_back((name, index));
         }
@@ -265,7 +304,10 @@ impl Bom {
                         let index = u32_read(&block_bytes[4..8]);
                         let block_bytes = blocks.slice(index, &file)?;
                         let mut cursor = std::io::Cursor::new(block_bytes);
-                        let metadata = Metadata::read(cursor.by_ref())?;
+                        let mut metadata = Metadata::read(cursor.by_ref())?;
+                        if let Some(size) = file_size_64.get(&index) {
+                            metadata.size = *size;
+                        }
                         eprintln!(
                             "kind {:?} metadata {:?} unread bytes {}/{} block {:?}",
                             metadata.file_type(),
@@ -387,6 +429,7 @@ impl BigEndianIo for Header {
         u32_write(writer.by_ref(), self.index.len)?;
         u32_write(writer.by_ref(), self.named_blocks.offset)?;
         u32_write(writer.by_ref(), self.named_blocks.len)?;
+        writer.write_all(&[0_u8; HEADER_PADDING])?;
         Ok(())
     }
 }
@@ -674,7 +717,10 @@ impl BigEndianIo for BomInfo {
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct BomInfoEntry {
-    x: [u32; 4],
+    x0: u32, // non-zero for executable files
+    x1: u32,
+    file_size: u32,
+    x3: u32,
 }
 
 impl BigEndianIo for BomInfoEntry {
@@ -682,20 +728,18 @@ impl BigEndianIo for BomInfoEntry {
         let mut data = [0_u8; 16];
         reader.read_exact(&mut data[..])?;
         Ok(BomInfoEntry {
-            x: [
-                u32_read(&data[0..4]),
-                u32_read(&data[4..8]),
-                u32_read(&data[8..12]),
-                u32_read(&data[12..16]),
-            ],
+            x0: u32_read(&data[0..4]),
+            x1: u32_read(&data[4..8]),
+            file_size: u32_read(&data[8..12]),
+            x3: u32_read(&data[12..16]),
         })
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        u32_write(writer.by_ref(), self.x[0])?;
-        u32_write(writer.by_ref(), self.x[1])?;
-        u32_write(writer.by_ref(), self.x[2])?;
-        u32_write(writer.by_ref(), self.x[3])?;
+        u32_write(writer.by_ref(), self.x0)?;
+        u32_write(writer.by_ref(), self.x1)?;
+        u32_write(writer.by_ref(), self.file_size)?;
+        u32_write(writer.by_ref(), self.x3)?;
         Ok(())
     }
 }
@@ -986,6 +1030,7 @@ pub struct Metadata {
     uid: u32,
     gid: u32,
     mtime: u32,
+    size: u64,
     extra: MetadataExtra,
 }
 
@@ -1015,6 +1060,10 @@ impl Metadata {
     pub fn mtime(&self) -> u32 {
         self.mtime
     }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
 }
 
 impl BigEndianIo for Metadata {
@@ -1029,24 +1078,16 @@ impl BigEndianIo for Metadata {
         let uid = u32_read_v2(reader.by_ref())?;
         let gid = u32_read_v2(reader.by_ref())?;
         let mtime = u32_read_v2(reader.by_ref())?;
+        let size = u32_read_v2(reader.by_ref())?;
+        let _x1 = u8_read(reader.by_ref())?;
+        debug_assert!(_x1 == 1, "x1 {:?}", _x1);
         let extra = match kind {
             FileType::File => {
-                let size = u32_read_v2(reader.by_ref())?;
-                let _x1 = u8_read(reader.by_ref())?;
-                debug_assert!(_x1 == 1, "x1 {:?}", _x1);
                 let checksum = u32_read_v2(reader.by_ref())?;
-                MetadataExtra::File { size, checksum }
+                MetadataExtra::File { checksum }
             }
-            FileType::Directory => {
-                let size = u32_read_v2(reader.by_ref())?;
-                let _x1 = u8_read(reader.by_ref())?;
-                debug_assert!(_x1 == 1, "x1 {:?}", _x1);
-                MetadataExtra::Directory { size }
-            }
+            FileType::Directory => MetadataExtra::Directory,
             FileType::Link => {
-                let size = u32_read_v2(reader.by_ref())?;
-                let _x1 = u8_read(reader.by_ref())?;
-                debug_assert!(_x1 == 1, "x1 {:?}", _x1);
                 let checksum = u32_read_v2(reader.by_ref())?;
                 let name_len = u32_read_v2(reader.by_ref())?;
                 debug_assert!(
@@ -1058,18 +1099,11 @@ impl BigEndianIo for Metadata {
                 let mut name = vec![0_u8; name_len as usize];
                 reader.read_exact(&mut name[..])?;
                 let name = CString::from_vec_with_nul(name).map_err(Error::other)?;
-                MetadataExtra::Link {
-                    size,
-                    checksum,
-                    name,
-                }
+                MetadataExtra::Link { checksum, name }
             }
             FileType::Device => {
-                let size = u32_read_v2(reader.by_ref())?;
-                let _x1 = u8_read(reader.by_ref())?;
-                debug_assert!(_x1 == 1, "x1 {:?}", _x1);
                 let dev = u32_read_v2(reader.by_ref())?;
-                MetadataExtra::Device(Device { size, dev })
+                MetadataExtra::Device(Device { dev })
             }
         };
         // We ignore 8 zero bytes here.
@@ -1078,6 +1112,7 @@ impl BigEndianIo for Metadata {
             uid,
             gid,
             mtime,
+            size: size as u64,
             extra,
         })
     }
@@ -1090,31 +1125,20 @@ impl BigEndianIo for Metadata {
         u32_write(writer.by_ref(), self.uid)?;
         u32_write(writer.by_ref(), self.gid)?;
         u32_write(writer.by_ref(), self.mtime)?;
+        u32_write(writer.by_ref(), self.size as u32)?; // truncate the size
+        u8_write(writer.by_ref(), 1_u8)?;
         match &self.extra {
-            MetadataExtra::File { size, checksum } => {
-                u32_write(writer.by_ref(), *size)?;
-                u8_write(writer.by_ref(), 1_u8)?;
+            MetadataExtra::File { checksum } => {
                 u32_write(writer.by_ref(), *checksum)?;
             }
-            MetadataExtra::Directory { size } => {
-                u32_write(writer.by_ref(), *size)?;
-                u8_write(writer.by_ref(), 1_u8)?;
-            }
-            MetadataExtra::Link {
-                size,
-                checksum,
-                name,
-            } => {
-                u32_write(writer.by_ref(), *size)?;
-                u8_write(writer.by_ref(), 1_u8)?;
+            MetadataExtra::Directory => {}
+            MetadataExtra::Link { checksum, name } => {
                 u32_write(writer.by_ref(), *checksum)?;
                 let name_bytes = name.as_bytes_with_nul();
                 u32_write(writer.by_ref(), name_bytes.len() as u32)?;
                 writer.write_all(name_bytes)?;
             }
-            MetadataExtra::Device(Device { size, dev }) => {
-                u32_write(writer.by_ref(), *size)?;
-                u8_write(writer.by_ref(), 1_u8)?;
+            MetadataExtra::Device(Device { dev }) => {
                 u32_write(writer.by_ref(), *dev)?;
             }
         }
@@ -1129,20 +1153,14 @@ impl TryFrom<std::fs::Metadata> for Metadata {
     fn try_from(other: std::fs::Metadata) -> Result<Self, Self::Error> {
         use std::os::unix::fs::MetadataExt;
         let kind: FileType = other.file_type().try_into()?;
-        let size: u32 = other
-            .size()
-            .try_into()
-            .map_err(|_| Error::other("files larger than 4 GiB are not supported"))?;
         let extra = match kind {
-            FileType::File => MetadataExtra::File { size, checksum: 0 },
-            FileType::Directory => MetadataExtra::Directory { size },
+            FileType::File => MetadataExtra::File { checksum: 0 },
+            FileType::Directory => MetadataExtra::Directory,
             FileType::Link => MetadataExtra::Link {
-                size,
                 checksum: 0,
                 name: Default::default(),
             },
             FileType::Device => MetadataExtra::Device(Device {
-                size,
                 dev: libc_dev_to_bom_dev(other.rdev()),
             }),
         };
@@ -1151,6 +1169,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
             uid: other.uid(),
             gid: other.gid(),
             mtime: other.mtime().try_into().unwrap_or(0),
+            size: other.size(),
             extra,
         })
     }
@@ -1159,25 +1178,15 @@ impl TryFrom<std::fs::Metadata> for Metadata {
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum MetadataExtra {
-    File {
-        size: u32,
-        checksum: u32,
-    },
-    Directory {
-        size: u32,
-    },
-    Link {
-        size: u32,
-        checksum: u32,
-        name: CString,
-    },
+    File { checksum: u32 },
+    Directory,
+    Link { checksum: u32, name: CString },
     Device(Device),
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Device {
-    size: u32,
     dev: u32,
 }
 
@@ -1221,6 +1230,14 @@ fn u32_read_v2<R: Read>(mut reader: R) -> Result<u32, Error> {
     Ok(u32::from_be_bytes([data[0], data[1], data[2], data[3]]))
 }
 
+fn u64_read<R: Read>(mut reader: R) -> Result<u64, Error> {
+    let mut data = [0_u8; 8];
+    reader.read_exact(&mut data[..])?;
+    Ok(u64::from_be_bytes([
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+    ]))
+}
+
 fn u8_write<W: Write>(mut writer: W, value: u8) -> Result<(), Error> {
     writer.write_all(&[value])
 }
@@ -1230,6 +1247,10 @@ fn u16_write<W: Write>(mut writer: W, value: u16) -> Result<(), Error> {
 }
 
 fn u32_write<W: Write>(mut writer: W, value: u32) -> Result<(), Error> {
+    writer.write_all(value.to_be_bytes().as_slice())
+}
+
+fn u64_write<W: Write>(mut writer: W, value: u64) -> Result<(), Error> {
     writer.write_all(value.to_be_bytes().as_slice())
 }
 
@@ -1254,8 +1275,9 @@ const HL_INDEX: &CStr = c"HLIndex";
 const SIZE_64: &CStr = c"Size64";
 const BOM_INFO: &CStr = c"BomInfo";
 const PATHS: &CStr = c"Paths";
-// TODO why 512?
-const HEADER_LEN: usize = 32;
+const HEADER_LEN: usize = 512;
+const REAL_HEADER_LEN: usize = 32;
+const HEADER_PADDING: usize = HEADER_LEN - REAL_HEADER_LEN;
 const VERSION: u32 = 1;
 const MODE_MASK: u16 = 0o7777;
 
@@ -1279,9 +1301,10 @@ mod tests {
             //"char.bom",
             //"dir.bom",
             //"file.bom",
-            "exe.bom",
             //"hardlink.bom",
             //"symlink.bom",
+            //"exe.bom",
+            "size64.bom",
         ] {
             Bom::read(File::open(filename).unwrap()).unwrap();
         }
@@ -1301,7 +1324,7 @@ mod tests {
         test_write_read::<VIndex>();
         test_write_read::<Tree>();
         test_write_read::<Paths>();
-        test_write_read::<Metadata>();
+        test_write_read_convert::<Metadata32, Metadata>();
     }
 
     #[test]
@@ -1314,12 +1337,17 @@ mod tests {
             let actual = Bom::read(&bytes[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
-        }); //.seed(0x15f0f38c0000003e);
+        });
     }
 
     fn test_write_read<T: for<'a> Arbitrary<'a> + Debug + Eq + BigEndianIo>() {
+        test_write_read_convert::<T, T>();
+    }
+
+    fn test_write_read_convert<X: for<'a> Arbitrary<'a>, T: From<X> + Debug + Eq + BigEndianIo>() {
         arbtest(|u| {
-            let expected: T = u.arbitrary()?;
+            let expected: X = u.arbitrary()?;
+            let expected: T = expected.into();
             let mut bytes = Vec::new();
             expected.write(&mut bytes).unwrap();
             let actual = T::read(&bytes[..]).unwrap();
@@ -1335,8 +1363,31 @@ mod tests {
                 uid: u.arbitrary()?,
                 gid: u.arbitrary()?,
                 mtime: u.arbitrary()?,
+                size: u.arbitrary()?,
                 extra: u.arbitrary()?,
             })
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Metadata32(Metadata);
+
+    impl<'a> Arbitrary<'a> for Metadata32 {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            Ok(Self(Metadata {
+                mode: u.arbitrary::<u16>()? & MODE_MASK,
+                uid: u.arbitrary()?,
+                gid: u.arbitrary()?,
+                mtime: u.arbitrary()?,
+                size: u.arbitrary::<u32>()? as u64,
+                extra: u.arbitrary()?,
+            }))
+        }
+    }
+
+    impl From<Metadata32> for Metadata {
+        fn from(other: Metadata32) -> Self {
+            other.0
         }
     }
 
