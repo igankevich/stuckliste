@@ -42,7 +42,7 @@ impl Bom {
         // skip the header
         writer.seek(SeekFrom::Start(HEADER_LEN as u64))?;
         let mut blocks = Blocks::new();
-        let mut vars = Vars::new();
+        let mut named_blocks = NamedBlocks::new();
         // v index
         {
             let paths = Paths::null();
@@ -51,7 +51,7 @@ impl Bom {
             let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
             let vindex = VIndex::new(i);
             let i = blocks.write_block(writer.by_ref(), |writer| vindex.write(writer))?;
-            vars.insert(V_INDEX.into(), i);
+            named_blocks.insert(V_INDEX.into(), i);
         }
         // hl index
         {
@@ -59,7 +59,7 @@ impl Bom {
             let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
             let tree = Tree::null(i);
             let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
-            vars.insert(HL_INDEX.into(), i);
+            named_blocks.insert(HL_INDEX.into(), i);
         }
         // size 64
         {
@@ -67,7 +67,7 @@ impl Bom {
             let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
             let tree = Tree::null(i);
             let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
-            vars.insert(SIZE_64.into(), i);
+            named_blocks.insert(SIZE_64.into(), i);
         }
         // paths
         let num_paths = {
@@ -135,7 +135,7 @@ impl Bom {
                 let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
                 let tree = Tree::new(i, num_paths);
                 let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
-                vars.insert(PATHS.into(), i);
+                named_blocks.insert(PATHS.into(), i);
             }
             num_paths
         };
@@ -146,19 +146,24 @@ impl Bom {
                 entries: Default::default(),
             };
             let i = blocks.write_block(writer.by_ref(), |writer| bom_info.write(writer))?;
-            vars.insert(BOM_INFO.into(), i);
+            named_blocks.insert(BOM_INFO.into(), i);
         }
-        // vars
-        let vars_block = Block::from_write(writer.by_ref(), |writer| vars.write(writer))?;
+        // named_blocks
+        let named_blocks_block =
+            Block::from_write(writer.by_ref(), |writer| named_blocks.write(writer))?;
         let index_block = Block::from_write(writer.by_ref(), |writer| blocks.write(writer))?;
         // write the header
         writer.seek(SeekFrom::Start(0))?;
         let header = Header {
             num_non_null_blocks: blocks.num_non_null_blocks() as u32,
-            index_offset: index_block.offset,
-            index_len: index_block.len,
-            vars_offset: vars_block.offset,
-            vars_len: vars_block.len,
+            index: Block {
+                offset: index_block.offset,
+                len: index_block.len,
+            },
+            named_blocks: Block {
+                offset: named_blocks_block.offset,
+                len: named_blocks_block.len,
+            },
         };
         header.write(writer.by_ref())?;
         let paths = self.nodes.to_paths()?;
@@ -173,15 +178,11 @@ impl Bom {
         reader.read_to_end(&mut file)?;
         let header = Header::read(&file[..HEADER_LEN])?;
         eprintln!("{header:?}");
-        let index_offset = header.index_offset as usize;
-        let index_len = header.index_len as usize;
-        let vars_offset = header.vars_offset as usize;
-        let vars_len = header.vars_len as usize;
-        let mut vars = Vars::read(&file[vars_offset..(vars_offset + vars_len)])?;
-        let mut blocks = Blocks::read(&file[index_offset..(index_offset + index_len)])?;
+        let mut named_blocks = NamedBlocks::read(header.named_blocks.slice(&file))?;
+        let mut blocks = Blocks::read(header.index.slice(&file))?;
         {
             let name = BOM_INFO;
-            let index = vars
+            let index = named_blocks
                 .remove(name)
                 .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
             let bom_info = BomInfo::read(blocks.slice(index, &file)?)?;
@@ -190,7 +191,7 @@ impl Bom {
         let mut trees = VecDeque::new();
         {
             let name = V_INDEX;
-            let index = vars
+            let index = named_blocks
                 .remove(name)
                 .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
             let v_index = VIndex::read(blocks.slice(index, &file)?)?;
@@ -198,9 +199,9 @@ impl Bom {
             trees.push_back((name, v_index.index));
         }
         let mut paths = VecDeque::new();
-        let vars = vars.vars;
-        eprintln!("vars {:?}", vars);
-        for (name, index) in vars.into_iter() {
+        let named_blocks = named_blocks.named_blocks;
+        eprintln!("named_blocks {:?}", named_blocks);
+        for (name, index) in named_blocks.into_iter() {
             trees.push_back((name, index));
         }
         while let Some((name, index)) = trees.pop_front() {
@@ -342,10 +343,8 @@ impl Bom {
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Header {
     num_non_null_blocks: u32,
-    index_offset: u32,
-    index_len: u32,
-    vars_offset: u32,
-    vars_len: u32,
+    index: Block,
+    named_blocks: Block,
 }
 
 impl BigEndianIo for Header {
@@ -365,14 +364,18 @@ impl BigEndianIo for Header {
         let num_non_null_blocks = u32_read(&file[12..16]);
         let index_offset = u32_read(&file[16..20]);
         let index_len = u32_read(&file[20..24]);
-        let vars_offset = u32_read(&file[24..28]);
-        let vars_len = u32_read(&file[28..32]);
+        let named_blocks_offset = u32_read(&file[24..28]);
+        let named_blocks_len = u32_read(&file[28..32]);
         Ok(Self {
             num_non_null_blocks,
-            index_offset,
-            index_len,
-            vars_offset,
-            vars_len,
+            index: Block {
+                offset: index_offset,
+                len: index_len,
+            },
+            named_blocks: Block {
+                offset: named_blocks_offset,
+                len: named_blocks_len,
+            },
         })
     }
 
@@ -380,33 +383,33 @@ impl BigEndianIo for Header {
         writer.write_all(&BOM_MAGIC[..])?;
         u32_write(writer.by_ref(), VERSION)?;
         u32_write(writer.by_ref(), self.num_non_null_blocks)?;
-        u32_write(writer.by_ref(), self.index_offset)?;
-        u32_write(writer.by_ref(), self.index_len)?;
-        u32_write(writer.by_ref(), self.vars_offset)?;
-        u32_write(writer.by_ref(), self.vars_len)?;
+        u32_write(writer.by_ref(), self.index.offset)?;
+        u32_write(writer.by_ref(), self.index.len)?;
+        u32_write(writer.by_ref(), self.named_blocks.offset)?;
+        u32_write(writer.by_ref(), self.named_blocks.len)?;
         Ok(())
     }
 }
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
-struct Vars {
-    /// Variable name -> block index.
-    vars: HashMap<CString, u32>,
+struct NamedBlocks {
+    /// Name -> index.
+    named_blocks: HashMap<CString, u32>,
 }
 
-impl Vars {
+impl NamedBlocks {
     fn new() -> Self {
         Self {
-            vars: Default::default(),
+            named_blocks: Default::default(),
         }
     }
 }
 
-impl BigEndianIo for Vars {
+impl BigEndianIo for NamedBlocks {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let num_vars = u32_read_v2(reader.by_ref())? as usize;
-        let mut vars = HashMap::with_capacity(num_vars);
-        for _ in 0..num_vars {
+        let num_named_blocks = u32_read_v2(reader.by_ref())? as usize;
+        let mut named_blocks = HashMap::with_capacity(num_named_blocks);
+        for _ in 0..num_named_blocks {
             let index = u32_read_v2(reader.by_ref())?;
             let len = u8_read(reader.by_ref())? as usize;
             let mut name = vec![0_u8; len];
@@ -416,16 +419,16 @@ impl BigEndianIo for Vars {
                 name.truncate(i);
             };
             let name = CString::new(name).map_err(|_| Error::other("invalid variable name"))?;
-            vars.insert(name, index);
+            named_blocks.insert(name, index);
         }
-        //eprintln!("vars {:?}", vars);
-        Ok(Self { vars })
+        //eprintln!("named_blocks {:?}", named_blocks);
+        Ok(Self { named_blocks })
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        let num_vars = self.vars.len() as u32;
-        u32_write(writer.by_ref(), num_vars)?;
-        for (name, index) in self.vars.iter() {
+        let num_named_blocks = self.named_blocks.len() as u32;
+        u32_write(writer.by_ref(), num_named_blocks)?;
+        for (name, index) in self.named_blocks.iter() {
             let name = name.to_bytes();
             let len = name.len();
             if len > u8::MAX as usize {
@@ -439,16 +442,16 @@ impl BigEndianIo for Vars {
     }
 }
 
-impl Deref for Vars {
+impl Deref for NamedBlocks {
     type Target = HashMap<CString, u32>;
     fn deref(&self) -> &Self::Target {
-        &self.vars
+        &self.named_blocks
     }
 }
 
-impl DerefMut for Vars {
+impl DerefMut for NamedBlocks {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.vars
+        &mut self.named_blocks
     }
 }
 
@@ -570,12 +573,13 @@ impl BigEndianIo for Blocks {
     }
 }
 
+/// A block of data.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Block {
-    // Byte offset from the start of the file.
+    /// Byte offset from the start of the file.
     offset: u32,
-    // Size in bytes.
+    /// Size in bytes.
     len: u32,
 }
 
@@ -1289,7 +1293,7 @@ mod tests {
     #[test]
     fn write_read() {
         test_write_read::<Header>();
-        test_write_read::<Vars>();
+        test_write_read::<NamedBlocks>();
         test_write_read::<Blocks>();
         test_write_read::<Block>();
         test_write_read::<BomInfo>();
