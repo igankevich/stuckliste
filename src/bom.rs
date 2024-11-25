@@ -211,7 +211,10 @@ impl Bom {
                 .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
             let v_index = VIndex::read(blocks.slice(index, &file)?)?;
             let name: CString = c"VIndex.index".into();
-            trees.push_back((name, v_index.index));
+            let tree = Tree::read(blocks.slice(v_index.index, &file)?)?;
+            debug_assert!(tree.num_paths == 0);
+            eprintln!("tree {:?} {:?}", name, tree);
+            //trees.push_back((name, v_index.index));
         }
         // block id -> file size
         let mut file_size_64 = HashMap::new();
@@ -312,14 +315,16 @@ impl Bom {
                         if let Some(size) = file_size_64.get(&index) {
                             metadata.size = *size;
                         }
+                        let unread_bytes = block_bytes.len() - cursor.position() as usize;
                         eprintln!(
-                            "kind {:?} metadata {:?} unread bytes {}/{} block {:?}",
+                            "kind {:?} metadata {:?} unread bytes {}/{} block {:02x?}",
                             metadata.file_type(),
                             metadata,
-                            block_bytes.len() - cursor.position() as usize,
+                            unread_bytes,
                             block_bytes.len(),
                             block_bytes
                         );
+                        debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
                         let node = Node {
                             id,
                             metadata,
@@ -419,7 +424,8 @@ impl BigEndianIo for Header {
     }
 }
 
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
+#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct NamedBlocks {
     /// Name -> index.
     named_blocks: HashMap<CString, u32>,
@@ -702,29 +708,35 @@ impl BigEndianIo for BomInfo {
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct BomInfoEntry {
-    x0: u32, // non-zero for executable files
-    x1: u32,
+    cpu_type: u32,
+    reserved1: u32,
     file_size: u32,
-    x3: u32,
+    reserved2: u32,
 }
 
 impl BigEndianIo for BomInfoEntry {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut data = [0_u8; 16];
         reader.read_exact(&mut data[..])?;
-        Ok(BomInfoEntry {
-            x0: u32_read(&data[0..4]),
-            x1: u32_read(&data[4..8]),
-            file_size: u32_read(&data[8..12]),
-            x3: u32_read(&data[12..16]),
-        })
+        let cpu_type = u32_read(&data[0..4]);
+        let reserved1 = u32_read(&data[4..8]);
+        let file_size = u32_read(&data[8..12]);
+        let reserved2 = u32_read(&data[12..16]);
+        let entry = BomInfoEntry {
+            cpu_type,
+            reserved1,
+            file_size,
+            reserved2,
+        };
+        debug_assert!(reserved1 == 0 && reserved2 == 0, "entry = {entry:?}");
+        Ok(entry)
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        u32_write(writer.by_ref(), self.x0)?;
-        u32_write(writer.by_ref(), self.x1)?;
+        u32_write(writer.by_ref(), self.cpu_type)?;
+        u32_write(writer.by_ref(), self.reserved1)?;
         u32_write(writer.by_ref(), self.file_size)?;
-        u32_write(writer.by_ref(), self.x3)?;
+        u32_write(writer.by_ref(), self.reserved2)?;
         Ok(())
     }
 }
@@ -1007,6 +1019,22 @@ Device len 35
 Directory len 31
 File len 35
 Link len 45
+
+
+01, // is executable flag?
+00, 00, 00, 02, // num arch
+01, 00, 00, 07, // cpu_type_t
+00, 00, 00, 03, // cpu_subtype_t
+00, 00, df, 50, // offset
+f1, 7d, 04, dd, // checksum
+01, 00, 00, 0c, // cpu_type_t
+80, 00, 00, 02, // cpu_subtype_t
+00, 00, de, 80, // offset
+5d, 06, d1, ec, // checksum
+00, 00, 00, 00, 00, 00, 00, 00 // trailer
+
+
+
 */
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -1023,7 +1051,7 @@ impl Metadata {
     pub fn file_type(&self) -> FileType {
         use MetadataExtra::*;
         match self.extra {
-            File { .. } => FileType::File,
+            File { .. } | Executable { .. } => FileType::File,
             Directory { .. } => FileType::Directory,
             Link { .. } => FileType::Link,
             Device { .. } => FileType::Device,
@@ -1049,6 +1077,18 @@ impl Metadata {
     pub fn size(&self) -> u64 {
         self.size
     }
+
+    fn arch(&self) -> u16 {
+        // arch 0xN00f
+        // N - no. of architectures in a fat binary
+        // f - always 0xf
+        match self.extra {
+            MetadataExtra::Executable { ref arches, .. } => {
+                0x0f_u16 | (((arches.len() & 0xf) as u16) << 12)
+            }
+            _ => 0x0f_u16,
+        }
+    }
 }
 
 impl BigEndianIo for Metadata {
@@ -1056,8 +1096,11 @@ impl BigEndianIo for Metadata {
         let kind: FileType = u8_read(reader.by_ref())?.try_into()?;
         let _x0 = u8_read(reader.by_ref())?;
         debug_assert!(_x0 == 1, "x0 {:?}", _x0);
-        let _arch = u16_read(reader.by_ref())?;
-        //eprintln!("arch {}", _arch);
+        let arch = u16_read(reader.by_ref())?;
+        if arch != 15 {
+            eprintln!("arch {:#x}", arch);
+        }
+        let num_arch = (arch >> 12) & 0xf;
         let mode = u16_read(reader.by_ref())?;
         let mode = mode & MODE_MASK;
         let uid = u32_read_v2(reader.by_ref())?;
@@ -1067,12 +1110,32 @@ impl BigEndianIo for Metadata {
         let _x1 = u8_read(reader.by_ref())?;
         debug_assert!(_x1 == 1, "x1 {:?}", _x1);
         let extra = match kind {
+            FileType::File if num_arch != 0 => {
+                let checksum = u32_read_v2(reader.by_ref())?;
+                let flag = u8_read(reader.by_ref())?;
+                debug_assert!(flag == 1, "flag = {flag}");
+                let num_arch_again = u32_read_v2(reader.by_ref())?;
+                debug_assert!(
+                    num_arch_again == num_arch as u32,
+                    "num_arch = {num_arch}, num_arch_again = {num_arch_again}",
+                );
+                let mut arches = Vec::with_capacity(num_arch_again as usize);
+                for _ in 0..num_arch_again {
+                    arches.push(ExeArch::read(reader.by_ref())?);
+                }
+                MetadataExtra::Executable { checksum, arches }
+            }
             FileType::File => {
+                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
                 let checksum = u32_read_v2(reader.by_ref())?;
                 MetadataExtra::File { checksum }
             }
-            FileType::Directory => MetadataExtra::Directory,
+            FileType::Directory => {
+                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
+                MetadataExtra::Directory
+            }
             FileType::Link => {
+                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
                 let checksum = u32_read_v2(reader.by_ref())?;
                 let name_len = u32_read_v2(reader.by_ref())?;
                 debug_assert!(
@@ -1087,25 +1150,29 @@ impl BigEndianIo for Metadata {
                 MetadataExtra::Link { checksum, name }
             }
             FileType::Device => {
+                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
                 let dev = u32_read_v2(reader.by_ref())?;
                 MetadataExtra::Device(Device { dev })
             }
         };
-        // We ignore 8 zero bytes here.
-        Ok(Self {
+        let metadata = Self {
             mode,
             uid,
             gid,
             mtime,
             size: size as u64,
             extra,
-        })
+        };
+        // We ignore 8 zero bytes here.
+        let trailer = u64_read(reader.by_ref())?;
+        debug_assert!(trailer == 0, "trailer = {trailer}, metadata = {metadata:?}");
+        Ok(metadata)
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         u8_write(writer.by_ref(), self.file_type() as u8)?;
         u8_write(writer.by_ref(), 1_u8)?;
-        u16_write(writer.by_ref(), 0_u16)?;
+        u16_write(writer.by_ref(), self.arch())?;
         u16_write(writer.by_ref(), self.mode & MODE_MASK)?;
         u32_write(writer.by_ref(), self.uid)?;
         u32_write(writer.by_ref(), self.gid)?;
@@ -1115,6 +1182,12 @@ impl BigEndianIo for Metadata {
         match &self.extra {
             MetadataExtra::File { checksum } => {
                 u32_write(writer.by_ref(), *checksum)?;
+            }
+            MetadataExtra::Executable { checksum, arches } => {
+                u32_write(writer.by_ref(), *checksum)?;
+                for arch in arches.iter() {
+                    arch.write(writer.by_ref())?;
+                }
             }
             MetadataExtra::Directory => {}
             MetadataExtra::Link { checksum, name } => {
@@ -1164,6 +1237,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum MetadataExtra {
     File { checksum: u32 },
+    Executable { checksum: u32, arches: Vec<ExeArch> },
     Directory,
     Link { checksum: u32, name: CString },
     Device(Device),
@@ -1173,6 +1247,39 @@ pub enum MetadataExtra {
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Device {
     dev: u32,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+pub struct ExeArch {
+    cpu_type: u32,
+    cpu_sub_type: u32,
+    // TODO what if the size is u64?
+    size: u32,
+    checksum: u32,
+}
+
+impl BigEndianIo for ExeArch {
+    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let cpu_type = u32_read_v2(reader.by_ref())?;
+        let cpu_sub_type = u32_read_v2(reader.by_ref())?;
+        let size = u32_read_v2(reader.by_ref())?;
+        let checksum = u32_read_v2(reader.by_ref())?;
+        Ok(Self {
+            cpu_type,
+            cpu_sub_type,
+            size,
+            checksum,
+        })
+    }
+
+    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        u32_write(writer.by_ref(), self.cpu_type)?;
+        u32_write(writer.by_ref(), self.cpu_sub_type)?;
+        u32_write(writer.by_ref(), self.size)?;
+        u32_write(writer.by_ref(), self.checksum)?;
+        Ok(())
+    }
 }
 
 impl Device {
@@ -1288,9 +1395,9 @@ mod tests {
             //"char.bom",
             //"dir.bom",
             //"file.bom",
-            "hardlink.bom",
+            //"hardlink.bom",
             //"symlink.bom",
-            //"exe.bom",
+            "exe.bom",
             //"size64.bom",
         ] {
             Bom::read(File::open(filename).unwrap()).unwrap();
