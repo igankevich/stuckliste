@@ -203,7 +203,6 @@ impl Bom {
             let bom_info = BomInfo::read(blocks.slice(index, &file)?)?;
             eprintln!("{:?}", bom_info);
         }
-        let mut trees = VecDeque::new();
         {
             let name = V_INDEX;
             let index = named_blocks
@@ -212,9 +211,31 @@ impl Bom {
             let v_index = VIndex::read(blocks.slice(index, &file)?)?;
             let name: CString = c"VIndex.index".into();
             let tree = Tree::read(blocks.slice(v_index.index, &file)?)?;
-            debug_assert!(tree.num_paths == 0);
             eprintln!("tree {:?} {:?}", name, tree);
-            //trees.push_back((name, v_index.index));
+            let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
+            for (index0, index1) in paths.indices.into_iter() {
+                let block_bytes = blocks.slice(index0, &file)?;
+                let index = u32_read_v2(&block_bytes[..])?;
+                if index != 0 {
+                    let tree = Tree::read(blocks.slice(index, &file)?)?;
+                    eprintln!("vindex inner tree {:?}", tree);
+                    let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
+                    for (index0, index1) in paths.indices.into_iter() {
+                        let block_bytes = blocks.slice(index0, &file)?;
+                        debug_assert!(block_bytes.is_empty());
+                        let block_bytes = blocks.slice(index1, &file)?;
+                        let name =
+                            CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
+                        eprintln!(
+                            "vindex inner block name {:?} {}: {:?}",
+                            name, index1, block_bytes
+                        );
+                    }
+                }
+                let block_bytes = blocks.slice(index1, &file)?;
+                let name = CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
+                eprintln!("vindex name {:?} block {}: {:?}", name, index1, block_bytes);
+            }
         }
         // block id -> file size
         let mut file_size_64 = HashMap::new();
@@ -261,104 +282,98 @@ impl Bom {
                 }
             }
         }
-        let mut paths = VecDeque::new();
-        let named_blocks = named_blocks.named_blocks;
-        for (name, index) in named_blocks.into_iter() {
-            trees.push_back((name, index));
-        }
-        while let Some((name, index)) = trees.pop_front() {
-            let tree = match Tree::read(blocks.slice(index, &file)?) {
-                Ok(tree) => tree,
-                Err(e) => {
-                    eprintln!("failed to parse {:?} as tree: {}", name, e);
-                    continue;
-                }
-            };
-            eprintln!("tree {:?} {:?}", name.to_str(), tree);
-            paths.push_back((name, tree.child));
-        }
         // id -> data
         let mut nodes = HashMap::new();
-        let mut visited = HashSet::new();
-        while let Some((name, index)) = paths.pop_front() {
-            if !visited.insert(index) {
-                //eprintln!("loop {}", index);
-                continue;
-            }
-            let path = Paths::read(blocks.slice(index, &file)?)?;
-            if !path.is_leaf {
-                eprintln!(
-                    "branch id {} forward {} backward {} indices {:?}",
-                    index, path.forward, path.backward, path.indices
-                );
-            }
-            eprintln!("read index {} paths {:?} name {:?}", index, path, name);
-            // is_leaf == 0 means count == 1?
-            for (index0, index1) in path.indices.into_iter() {
-                let child = if !path.is_leaf {
-                    paths.push_back((name.clone(), index0));
-                    // index1 appears to be irrelevant here
-                    // (equals to index1 of the last file in the referenced Paths)
-                    None
-                } else {
-                    let block_bytes = blocks.slice(index0, &file)?;
-                    eprintln!("block {}: {:?}", index0, block_bytes);
-                    if block_bytes.len() == 0 {
+        if let Some(index) = named_blocks.remove(PATHS) {
+            let tree = Tree::read(blocks.slice(index, &file)?)?;
+            eprintln!("tree {:?} {:?}", PATHS, tree);
+            let mut paths = VecDeque::new();
+            paths.push_back((PATHS, tree.child));
+            let mut visited = HashSet::new();
+            while let Some((name, index)) = paths.pop_front() {
+                if !visited.insert(index) {
+                    //eprintln!("loop {}", index);
+                    continue;
+                }
+                let path = Paths::read(blocks.slice(index, &file)?)?;
+                if !path.is_leaf {
+                    eprintln!(
+                        "branch id {} forward {} backward {} indices {:?}",
+                        index, path.forward, path.backward, path.indices
+                    );
+                }
+                eprintln!("read index {} paths {:?} name {:?}", index, path, name);
+                for (index0, index1) in path.indices.into_iter() {
+                    let child = if !path.is_leaf {
+                        paths.push_back((c"paths.root", index0));
+                        // index1 appears to be irrelevant here
+                        // (equals to index1 of the last file in the referenced Paths)
                         None
                     } else {
-                        let id = u32_read(&block_bytes[0..4]);
-                        eprintln!("id {}", id);
-                        let index = u32_read(&block_bytes[4..8]);
-                        let block_bytes = blocks.slice(index, &file)?;
-                        let mut cursor = std::io::Cursor::new(block_bytes);
-                        let mut metadata = Metadata::read(cursor.by_ref())?;
-                        if let Some(size) = file_size_64.get(&index) {
-                            metadata.size = *size;
+                        let block_bytes = blocks.slice(index0, &file)?;
+                        eprintln!("block {}: {:?}", index0, block_bytes);
+                        if block_bytes.len() == 0 {
+                            None
+                        } else {
+                            let id = u32_read(&block_bytes[0..4]);
+                            eprintln!("id {}", id);
+                            let index = u32_read(&block_bytes[4..8]);
+                            let block_bytes = blocks.slice(index, &file)?;
+                            let mut cursor = std::io::Cursor::new(block_bytes);
+                            let mut metadata = Metadata::read(cursor.by_ref())?;
+                            if let Some(size) = file_size_64.get(&index) {
+                                metadata.size = *size;
+                            }
+                            let unread_bytes = block_bytes.len() - cursor.position() as usize;
+                            debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
+                            let node = Node {
+                                id,
+                                metadata,
+                                parent: 0,
+                                name: Default::default(),
+                            };
+                            Some(node)
                         }
-                        let unread_bytes = block_bytes.len() - cursor.position() as usize;
-                        eprintln!(
-                            "kind {:?} metadata {:?} unread bytes {}/{} block {:02x?}",
-                            metadata.file_type(),
-                            metadata,
-                            unread_bytes,
-                            block_bytes.len(),
-                            block_bytes
-                        );
-                        debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
-                        let node = Node {
-                            id,
-                            metadata,
-                            parent: 0,
-                            name: Default::default(),
-                        };
-                        Some(node)
-                    }
-                };
-                {
-                    let block_bytes = blocks.slice(index1, &file)?;
-                    eprintln!("block {}: {:?}", index1, block_bytes);
-                    let parent = u32_read(&block_bytes[0..4]);
-                    let name =
-                        CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
-                    let name = OsStr::from_bytes(name.to_bytes());
-                    if !path.is_leaf {
-                        eprintln!("parent {} name {:?}", parent, name.to_str());
-                    }
-                    //eprintln!("file parent {} name {}", parent, name,);
-                    if let Some(mut child) = child {
-                        child.name = name.into();
-                        child.parent = parent;
-                        nodes.insert(child.id, child);
+                    };
+                    {
+                        let block_bytes = blocks.slice(index1, &file)?;
+                        eprintln!("block {}: {:?}", index1, block_bytes);
+                        let parent = u32_read(&block_bytes[0..4]);
+                        let name =
+                            CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
+                        let name = OsStr::from_bytes(name.to_bytes());
+                        if !path.is_leaf {
+                            eprintln!("branch ({},{}) parent {} name {:?}", index0, index1, parent, name.to_str());
+                        }
+                        //eprintln!("file parent {} name {}", parent, name,);
+                        if let Some(mut child) = child {
+                            eprintln!(
+                                "name {:?} id {} parent {} kind {:?} metadata {:?}",
+                                name,
+                                child.id,
+                                parent,
+                                child.metadata.file_type(),
+                                child.metadata,
+                            );
+                            child.name = name.into();
+                            child.parent = parent;
+                            nodes.insert(child.id, child);
+                        }
                     }
                 }
-            }
-            if path.forward != 0 {
-                paths.push_back((name.clone(), path.forward));
-            }
-            if path.backward != 0 {
-                paths.push_back((name.clone(), path.backward));
+                if name != c"paths.root" {
+                    debug_assert!(path.forward == 0);
+                    debug_assert!(path.backward == 0);
+                }
+                if path.forward != 0 {
+                    paths.push_back((name, path.forward));
+                }
+                if path.backward != 0 {
+                    paths.push_back((name, path.backward));
+                }
             }
         }
+        debug_assert!(named_blocks.named_blocks.is_empty());
         #[cfg(test)]
         blocks.print_unread_blocks();
         let nodes = Nodes { nodes };
@@ -522,7 +537,14 @@ impl Blocks {
             "read block index {} block {:?} slice {:?}",
             index, block, slice
         );
+        if slice.len() > 4096 {
+            eprintln!("BIG BLOCK");
+        }
         Ok(slice)
+    }
+
+    fn block(&self, i: u32) -> &Block {
+        &self.blocks[i as usize]
     }
 
     fn num_non_null_blocks(&self) -> usize {
@@ -774,6 +796,112 @@ impl BigEndianIo for VIndex {
         u32_write(writer.by_ref(), 0_u32)?;
         u8_write(writer.by_ref(), 0_u8)?;
         Ok(())
+    }
+}
+
+struct TreeV2<K: BigEndianIo, V: BigEndianIo> {
+    root: TreeNode<K, V>,
+}
+
+impl<K: BigEndianIo, V: BigEndianIo> TreeV2<K, V> {
+    fn write<W: Write + Seek>(&self, mut writer: W, blocks: &mut Blocks) -> Result<u32, Error> {
+        let i = self.root.write(writer.by_ref(), blocks)?;
+        let block_size = blocks.block(i).len;
+        let i = blocks.write_block(writer.by_ref(), |writer| {
+            writer.write_all(&TREE_MAGIC[..])?;
+            u32_write(writer.by_ref(), VERSION)?;
+            u32_write(writer.by_ref(), i)?;
+            u32_write(writer.by_ref(), block_size)?;
+            u32_write(writer.by_ref(), self.root.entries.len() as u32)?;
+            u8_write(writer.by_ref(), 0_u8)?;
+            Ok(())
+        })?;
+        Ok(i)
+    }
+
+    fn read(i: u32, file: &[u8], blocks: &mut Blocks) -> Result<Self, Error> {
+        // tree
+        let mut reader = blocks.slice(i, file)?;
+        let mut magic = [0_u8; 4];
+        reader.read_exact(&mut magic[..])?;
+        if TREE_MAGIC[..] != magic[..] {
+            return Err(Error::other("invalid tree magic"));
+        }
+        let version = u32_read_v2(reader.by_ref())?;
+        if version != VERSION {
+            return Err(Error::other(format!(
+                "unsupported tree version: {}",
+                version
+            )));
+        }
+        let child = u32_read_v2(reader.by_ref())?;
+        let block_size = u32_read_v2(reader.by_ref())?;
+        debug_assert!(block_size as usize == reader.len());
+        let num_paths = u32_read_v2(reader.by_ref())?;
+        let _x = u8_read(reader.by_ref())?;
+        let root = TreeNode::read(child, file, blocks)?;
+        debug_assert!(num_paths as usize == root.entries.len());
+        Ok(Self { root })
+    }
+}
+
+struct TreeNode<K: BigEndianIo, V: BigEndianIo> {
+    entries: Vec<(K, V)>,
+    forward: u32,
+    backward: u32,
+    is_leaf: bool,
+}
+
+impl<K: BigEndianIo, V: BigEndianIo> TreeNode<K, V> {
+    fn write<W: Write + Seek>(&self, mut writer: W, blocks: &mut Blocks) -> Result<u32, Error> {
+        let mut entries_bytes = {
+            let mut w = Vec::new();
+            let count = self.entries.len();
+            if count > u16::MAX as usize {
+                return Err(Error::other("too many entries"));
+            }
+            let is_leaf = if self.is_leaf { 1 } else { 0 };
+            u16_write(w.by_ref(), is_leaf)?;
+            u16_write(w.by_ref(), count as u16)?;
+            u32_write(w.by_ref(), self.forward)?;
+            u32_write(w.by_ref(), self.backward)?;
+            for (key, value) in self.entries.iter() {
+                let i = blocks.write_block(writer.by_ref(), |writer| key.write(writer))?;
+                let j = blocks.write_block(writer.by_ref(), |writer| value.write(writer))?;
+                u32_write(w.by_ref(), i)?;
+                u32_write(w.by_ref(), j)?;
+            }
+            w
+        };
+        let block_size = entries_bytes.len() as u32;
+        let block_size = block_size
+            .checked_next_multiple_of(4096)
+            .unwrap_or(block_size);
+        entries_bytes.resize(block_size as usize, 0_u8);
+        let i = blocks.write_block(writer.by_ref(), |writer| writer.write_all(&entries_bytes))?;
+        Ok(i)
+    }
+
+    fn read(i: u32, file: &[u8], blocks: &mut Blocks) -> Result<Self, Error> {
+        let mut reader = blocks.slice(i, file)?;
+        let is_leaf = u16_read(reader.by_ref())? != 0;
+        let count = u16_read(reader.by_ref())?;
+        let forward = u32_read_v2(reader.by_ref())?;
+        let backward = u32_read_v2(reader.by_ref())?;
+        let mut entries = Vec::new();
+        for _ in 0..count {
+            let i = u32_read_v2(reader.by_ref())?;
+            let key = K::read(blocks.slice(i, file)?)?;
+            let i = u32_read_v2(reader.by_ref())?;
+            let value = V::read(blocks.slice(i, file)?)?;
+            entries.push((key, value));
+        }
+        Ok(Self {
+            entries,
+            forward,
+            backward,
+            is_leaf,
+        })
     }
 }
 
@@ -1116,7 +1244,7 @@ impl BigEndianIo for Metadata {
                 debug_assert!(flag == 1, "flag = {flag}");
                 let num_arch_again = u32_read_v2(reader.by_ref())?;
                 debug_assert!(
-                    num_arch_again == num_arch as u32,
+                    num_arch_again.min(2) == num_arch as u32,
                     "num_arch = {num_arch}, num_arch_again = {num_arch_again}",
                 );
                 let mut arches = Vec::with_capacity(num_arch_again as usize);
@@ -1390,21 +1518,28 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        for filename in [
-            //"block.bom",
-            //"char.bom",
-            //"dir.bom",
-            //"file.bom",
-            //"hardlink.bom",
-            //"symlink.bom",
-            "exe.bom",
-            //"size64.bom",
-        ] {
-            Bom::read(File::open(filename).unwrap()).unwrap();
-        }
-        //let crc_reader = CrcReader::new(File::open("file").unwrap());
-        //eprintln!("checksum {}", crc_reader.digest().unwrap());
-        //Header::read(File::open("macos/src.bom").unwrap()).unwrap();
+        //for filename in [
+        //    //"block.bom",
+        //    //"char.bom",
+        //    "dir.bom",
+        //    //"file.bom",
+        //    //"hardlink.bom",
+        //    //"symlink.bom",
+        //    //"exe.bom",
+        //    //"size64.bom",
+        //] {
+        //    Bom::read(File::open(filename).unwrap()).unwrap();
+        //}
+        //Bom::read(File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap()).unwrap();
+        Bom::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
+        //for entry in WalkDir::new("boms").into_iter() {
+        //    let entry = entry.unwrap();
+        //    if entry.file_type().is_dir() {
+        //        continue;
+        //    }
+        //    eprintln!("reading {:?}", entry.path());
+        //    Bom::read(File::open(entry.path()).unwrap()).unwrap();
+        //}
     }
 
     #[test]

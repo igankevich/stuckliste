@@ -1,3 +1,4 @@
+#![allow(unused)]
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
