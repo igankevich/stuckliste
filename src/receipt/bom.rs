@@ -8,11 +8,9 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::io::*;
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
 use crate::receipt::Metadata;
@@ -21,6 +19,7 @@ use crate::receipt::PathComponentKey;
 use crate::receipt::PathComponentValue;
 use crate::receipt::PathTree;
 use crate::receipt::Ptr;
+use crate::receipt::VirtualPathTree;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
@@ -28,7 +27,6 @@ use crate::Bom;
 use crate::NamedBlocks;
 use crate::TreeNode;
 use crate::TreeV2;
-use crate::TREE_MAGIC;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
 pub struct Receipt {
@@ -50,27 +48,30 @@ impl Receipt {
         writer.seek(SeekFrom::Start(Bom::LEN as u64))?;
         let mut blocks = Blocks::new();
         let mut named_blocks = NamedBlocks::new();
-        // v index
+        let mut context = Context::new();
         {
-            let paths = Paths::null();
-            let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
-            let tree = Tree::new_v_index(i);
-            let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
-            let vindex = VIndex::new(i);
-            let i = blocks.append(writer.by_ref(), |writer| vindex.write(writer))?;
+            let vindex = VirtualPathTree::new();
+            let i = vindex.write_block(writer.by_ref(), &mut blocks, &mut context)?;
             named_blocks.insert(V_INDEX.into(), i);
         }
         // hl index
         {
-            let paths = Paths::null();
-            let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
-            let tree = Tree::null(i);
-            let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
+            let hard_links = HardLinkTree::new_leaf();
+            let i = hard_links.write_block(writer.by_ref(), &mut blocks, &mut context)?;
             named_blocks.insert(HL_INDEX.into(), i);
         }
-        let mut file_size_64 = HashMap::new();
         // paths
         {
+            let paths = PathComponentTree::new(
+                self.tree
+                    .nodes()
+                    .values()
+                    .cloned()
+                    .map(|component| component.into_key_and_value()),
+            );
+            let i = paths.write_block(writer.by_ref(), &mut blocks, &mut context)?;
+            named_blocks.insert(PATHS.into(), i);
+            /*
             let edges = self.tree.edges();
             eprintln!("write edges {:?}", edges);
             let mut roots = Vec::new();
@@ -138,11 +139,16 @@ impl Receipt {
                 let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
                 named_blocks.insert(PATHS.into(), i);
             }
+            */
         };
         // size 64
         {
+            eprintln!("write file_size_64 {:#?}", context.file_size_64);
+            let file_size_tree =
+                FileSizeTree::new_inverted(std::mem::take(&mut context.file_size_64));
+            let i = file_size_tree.write_block(writer.by_ref(), &mut blocks, &mut context)?;
+            /*
             let mut indices = Vec::new();
-            eprintln!("write file_size_64 {:#?}", file_size_64);
             for (metadata_index, file_size) in file_size_64.into_iter() {
                 let i = blocks.append(writer.by_ref(), |writer| file_size.write(writer))?;
                 let j =
@@ -154,6 +160,7 @@ impl Receipt {
             let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
             let tree = Tree::new(i, num_paths);
             let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
+            */
             named_blocks.insert(SIZE_64.into(), i);
         }
         // bom info
@@ -191,41 +198,11 @@ impl Receipt {
             let bom_info = BomInfo::read(blocks.slice(index, &file)?)?;
             eprintln!("{:?}", bom_info);
         }
-        {
-            let name = V_INDEX;
-            let index = named_blocks
-                .remove(name)
-                .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
-            let v_index = VIndex::read(blocks.slice(index, &file)?)?;
-            let name: CString = c"VIndex.index".into();
-            let tree = Tree::read(blocks.slice(v_index.index, &file)?)?;
-            eprintln!("tree {:?} {:?}", name, tree);
-            let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
-            for (index0, index1) in paths.indices.into_iter() {
-                let block_bytes = blocks.slice(index0, &file)?;
-                let index = u32::read(&block_bytes[..])?;
-                if index != 0 {
-                    let tree = Tree::read(blocks.slice(index, &file)?)?;
-                    eprintln!("vindex inner tree {:?}", tree);
-                    let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
-                    for (index0, index1) in paths.indices.into_iter() {
-                        let block_bytes = blocks.slice(index0, &file)?;
-                        debug_assert!(block_bytes.is_empty());
-                        let block_bytes = blocks.slice(index1, &file)?;
-                        let name =
-                            CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
-                        eprintln!(
-                            "vindex inner block name {:?} {}: {:?}",
-                            name, index1, block_bytes
-                        );
-                    }
-                }
-                let block_bytes = blocks.slice(index1, &file)?;
-                let name = CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
-                eprintln!("vindex name {:?} block {}: {:?}", name, index1, block_bytes);
-            }
-        }
         let mut context = Context::new();
+        if let Some(index) = named_blocks.remove(V_INDEX) {
+            let vindex = VirtualPathTree::read_block(index, &file, &mut blocks, &mut context)?;
+            eprintln!("vindex {:#?}", vindex);
+        }
         // block id -> file size
         if let Some(index) = named_blocks.remove(SIZE_64) {
             let tree = FileSizeTree::read_block(index, &file, &mut blocks, &mut context)?;
@@ -302,7 +279,7 @@ impl Receipt {
                 //}
             }
         }
-        debug_assert!(named_blocks.is_empty());
+        debug_assert!(named_blocks.is_empty(), "named blocks {:?}", named_blocks);
         let tree = PathTree::new(graph);
         eprintln!("tree {:#?}", tree);
         let paths = tree.to_paths()?;
@@ -313,44 +290,7 @@ impl Receipt {
     }
 }
 
-#[derive(Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-struct VIndex {
-    index: u32,
-}
-
-impl VIndex {
-    const VERSION: u32 = 1;
-
-    fn new(index: u32) -> Self {
-        Self { index }
-    }
-}
-
-impl BigEndianIo for VIndex {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let version = u32::read(reader.by_ref())?;
-        if version != Self::VERSION {
-            return Err(Error::other(format!(
-                "unsupported VIndex version: {}",
-                version
-            )));
-        }
-        let index = u32::read(reader.by_ref())?;
-        let _x0 = u32::read(reader.by_ref())?;
-        let _x1 = u8::read(reader.by_ref())?;
-        Ok(Self { index })
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        write_be(writer.by_ref(), Self::VERSION)?;
-        write_be(writer.by_ref(), self.index)?;
-        write_be(writer.by_ref(), 0_u32)?;
-        0_u8.write(writer.by_ref())?;
-        Ok(())
-    }
-}
-
+/*
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Tree {
@@ -485,10 +425,7 @@ impl BigEndianIo for Paths {
         Ok(())
     }
 }
-
-fn u32_read(data: &[u8]) -> u32 {
-    u32::from_be_bytes([data[0], data[1], data[2], data[3]])
-}
+*/
 
 /// Virtual paths (i.e. paths defined with regular expressions).
 pub const V_INDEX: &CStr = c"VIndex";
@@ -522,25 +459,27 @@ mod tests {
     use arbtest::arbtest;
 
     use super::*;
-    use crate::receipt::BomInfoEntry;
     use crate::test::test_write_read;
     use crate::Block;
 
     #[test]
     fn bom_read() {
-        for filename in [
-            //"block.bom",
-            //"char.bom",
-            //"dir.bom",
-            //"file.bom",
-            "hardlink.bom",
-            //"symlink.bom",
-            //"exe.bom",
-            //"size64.bom",
-        ] {
-            Receipt::read(File::open(filename).unwrap()).unwrap();
-        }
-        //Receipt::read(File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap()).unwrap();
+        //for filename in [
+        //    //"block.bom",
+        //    //"char.bom",
+        //    //"dir.bom",
+        //    //"file.bom",
+        //    "hardlink.bom",
+        //    //"symlink.bom",
+        //    //"exe.bom",
+        //    //"size64.bom",
+        //] {
+        //    Receipt::read(File::open(filename).unwrap()).unwrap();
+        //}
+        Receipt::read(
+            File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
+        )
+        .unwrap();
         //Receipt::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
         //Receipt::read(File::open("cars/0E9C2921-1D9F-4EE8-8E47-A8AB1737DF6E.car").unwrap()).unwrap();
         //for entry in WalkDir::new("boms").into_iter() {
@@ -559,11 +498,9 @@ mod tests {
         test_write_read::<NamedBlocks>();
         test_write_read::<Blocks>();
         test_write_read::<Block>();
-        test_write_read::<BomInfo>();
-        test_write_read::<BomInfoEntry>();
-        test_write_read::<VIndex>();
-        test_write_read::<Tree>();
-        test_write_read::<Paths>();
+        //test_write_read::<VirtualPathTree>();
+        //test_write_read::<Tree>();
+        //test_write_read::<Paths>();
     }
 
     #[test]

@@ -3,10 +3,12 @@ use std::io::Seek;
 use std::io::Write;
 
 use crate::receipt::Context;
+use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
-use crate::BigEndianIo;
 
+#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Ptr<T>(T);
 
 impl<T> Ptr<T> {
@@ -38,9 +40,22 @@ impl<T: BlockIo<Context>> BlockIo<Context> for Ptr<T> {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<Self, Error> {
-        let mut reader = blocks.slice(i, file)?;
+        let reader = blocks.slice(i, file)?;
         let i = u32::read(reader)?;
         let value = T::read_block(i, file, blocks, context)?;
         Ok(value.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::test::block_io_symmetry;
+
+    #[test]
+    fn write_read_symmetry() {
+        block_io_symmetry::<Ptr<()>>();
+        block_io_symmetry::<Ptr<u32>>();
     }
 }

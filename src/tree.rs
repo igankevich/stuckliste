@@ -8,12 +8,45 @@ use crate::io::*;
 use crate::BlockIo;
 use crate::Blocks;
 
+#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct TreeV2<K, V, C> {
     root: TreeNode<K, V, C>,
 }
 
 impl<C, K: BlockIo<C>, V: BlockIo<C>> TreeV2<K, V, C> {
     const VERSION: u32 = 1;
+
+    pub fn new_leaf() -> Self {
+        Self {
+            root: TreeNode::new_leaf(),
+        }
+    }
+
+    pub fn new<I: IntoIterator<Item = (K, V)>>(entries: I) -> Self {
+        // TODO group by block size
+        let entries = entries.into_iter().collect();
+        Self {
+            root: TreeNode::Node {
+                forward: 0,
+                backward: 0,
+                entries,
+            },
+        }
+    }
+
+    /// Some trees in BOM files are inverted, i.e. swap values with keys.
+    pub fn new_inverted<I: IntoIterator<Item = (V, K)>>(entries: I) -> Self {
+        // TODO group by block size
+        let entries = entries.into_iter().map(|(k, v)| (v, k)).collect();
+        Self {
+            root: TreeNode::Node {
+                forward: 0,
+                backward: 0,
+                entries,
+            },
+        }
+    }
 
     pub fn into_inner(self) -> TreeNode<K, V, C> {
         self.root
@@ -49,7 +82,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeV2<K, V, C> {
     ) -> Result<Self, Error> {
         // tree
         let mut reader = blocks.slice(i, file)?;
-        let block_len = reader.len();
+        let _block_len = reader.len();
         let mut magic = [0_u8; 4];
         reader.read_exact(&mut magic[..])?;
         if TREE_MAGIC[..] != magic[..] {
@@ -66,7 +99,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeV2<K, V, C> {
         let _block_size = u32::read(reader.by_ref())?;
         // TODO
         //debug_assert!(block_size as usize == block_len, "block_size = {block_size}, block_len = {block_len}");
-        let num_paths = u32::read(reader.by_ref())?;
+        let _num_paths = u32::read(reader.by_ref())?;
         let _x = u8::read(reader.by_ref())?;
         let root = TreeNode::read_block(child, file, blocks, context)?;
         // TODO this is total number of paths
@@ -75,7 +108,8 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeV2<K, V, C> {
     }
 }
 
-// TODO Swap key and value ???
+#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum TreeNode<K, V, C> {
     Root {
         entries: Vec<(u32, V)>,
@@ -89,6 +123,14 @@ pub enum TreeNode<K, V, C> {
 }
 
 impl<C, K: BlockIo<C>, V: BlockIo<C>> TreeNode<K, V, C> {
+    pub fn new_leaf() -> Self {
+        Self::Node {
+            forward: 0,
+            backward: 0,
+            entries: Default::default(),
+        }
+    }
+
     pub fn is_leaf(&self) -> bool {
         match self {
             Self::Root { .. } => false,
@@ -214,12 +256,14 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeNode<K, V, C> {
                     let value = V::read_block(i, file, blocks, context)?;
                     entries.push((key, value));
                 }
-                Self::Root { entries, _phantom: Default::default() }
+                Self::Root {
+                    entries,
+                    _phantom: Default::default(),
+                }
             }
         };
         Ok(node)
     }
 }
 
-// TODO hide
-pub(crate) const TREE_MAGIC: [u8; 4] = *b"tree";
+const TREE_MAGIC: [u8; 4] = *b"tree";

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::CStr;
+use std::ffi::CString;
 use std::ffi::OsStr;
-use std::ffi::OsString;
 use std::fs::File;
 use std::io::Error;
 use std::io::Read;
@@ -23,6 +23,8 @@ use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
 
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct PathComponentKey {
     id: u32,
     metadata: Metadata,
@@ -41,7 +43,18 @@ impl BlockIo<Context> for PathComponentKey {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
-        Ok(0)
+        let metadata_index =
+            blocks.append(writer.by_ref(), |writer| self.metadata.write(writer))?;
+        let file_size = self.metadata.size();
+        if file_size > u32::MAX as u64 {
+            context.file_size_64.insert(metadata_index, file_size);
+        }
+        let i = blocks.append(writer.by_ref(), |writer| {
+            self.id.write(writer.by_ref())?;
+            metadata_index.write(writer.by_ref())?;
+            Ok(())
+        })?;
+        Ok(i)
     }
 
     fn read_block(
@@ -68,32 +81,38 @@ impl BlockIo<Context> for PathComponentKey {
     }
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct PathComponentValue {
     parent: u32,
-    name: OsString,
+    name: CString,
 }
 
-impl<C> BlockIo<C> for PathComponentValue {
+impl BlockIo<Context> for PathComponentValue {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
         blocks: &mut Blocks,
-        context: &mut C,
+        _context: &mut Context,
     ) -> Result<u32, Error> {
-        Ok(0)
+        let i = blocks.append(writer.by_ref(), |writer| {
+            self.parent.write(writer.by_ref())?;
+            writer.write_all(self.name.to_bytes_with_nul())?;
+            Ok(())
+        })?;
+        Ok(i)
     }
 
     fn read_block(
         i: u32,
         file: &[u8],
         blocks: &mut Blocks,
-        context: &mut C,
+        _context: &mut Context,
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, &file)?;
         eprintln!("block {}: {:?}", i, reader);
         let parent = u32::read(reader.by_ref())?;
         let name = CStr::from_bytes_with_nul(reader).map_err(Error::other)?;
-        let name = OsStr::from_bytes(name.to_bytes());
         //eprintln!(
         //    "name {:?} id {} parent {} kind {:?} metadata {:?}",
         //    name,
@@ -109,14 +128,14 @@ impl<C> BlockIo<C> for PathComponentValue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct PathComponent {
     // TODO make private
     pub id: u32,
     pub parent: u32,
     pub metadata: Metadata,
-    pub name: OsString,
+    pub name: CString,
 }
 
 impl PathComponent {
@@ -127,6 +146,18 @@ impl PathComponent {
             parent: value.parent,
             name: value.name,
         }
+    }
+
+    pub fn into_key_and_value(self) -> (PathComponentKey, PathComponentValue) {
+        let key = PathComponentKey {
+            id: self.id,
+            metadata: self.metadata.clone(),
+        };
+        let value = PathComponentValue {
+            parent: self.parent,
+            name: self.name.clone(),
+        };
+        (key, value)
     }
 }
 
@@ -151,7 +182,8 @@ impl PathTree {
             let Some(node) = self.nodes.get(&id) else {
                 break;
             };
-            components.push(node.name.as_os_str());
+            let name = OsStr::from_bytes(node.name.to_bytes());
+            components.push(name);
             id = node.parent;
         }
         let mut path = PathBuf::new();
@@ -213,16 +245,19 @@ impl PathTree {
                 }
                 _ => {}
             }
+            let parent = match dirname {
+                Some(d) => nodes.get(d).map(|node| node.id).unwrap_or(0),
+                None => 0,
+            };
+            let name = match basename {
+                Some(s) => s.as_bytes(),
+                None => relative_path.as_os_str().as_bytes(),
+            };
+            let name = CString::new(name).map_err(Error::other)?;
             let node = PathComponent {
                 id,
-                parent: match dirname {
-                    Some(d) => nodes.get(d).map(|node| node.id).unwrap_or(0),
-                    None => 0,
-                },
-                name: match basename {
-                    Some(s) => s.into(),
-                    None => relative_path.clone().into(),
-                },
+                parent,
+                name,
                 metadata,
             };
             nodes.insert(relative_path, node);
@@ -235,11 +270,19 @@ impl PathTree {
 
 #[cfg(test)]
 mod tests {
+
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use cpio_test::DirectoryOfFiles;
 
     use super::*;
+    use crate::test::block_io_symmetry;
+
+    #[test]
+    fn write_read_symmetry() {
+        block_io_symmetry::<PathComponentKey>();
+        block_io_symmetry::<PathComponentValue>();
+    }
 
     impl<'a> Arbitrary<'a> for PathTree {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {

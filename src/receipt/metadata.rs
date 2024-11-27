@@ -77,8 +77,8 @@ impl Metadata {
         // N - no. of architectures in a fat binary
         // f - always 0xf
         match self.extra {
-            MetadataExtra::Executable { ref arches, .. } => {
-                0x0f_u16 | (((arches.len() & 0xf) as u16) << 12)
+            MetadataExtra::Executable(Executable { ref arches, .. }) => {
+                0x0f_u16 | (((arches.len() & 0xf).min(MAX_ARCHES) as u16) << 12)
             }
             _ => 0x0f_u16,
         }
@@ -86,7 +86,7 @@ impl Metadata {
 
     pub(crate) fn accumulate(&self, stats: &mut BomInfo) {
         match self.extra {
-            MetadataExtra::Executable { ref arches, .. } => {
+            MetadataExtra::Executable(Executable { ref arches, .. }) => {
                 for arch in arches.iter() {
                     stats.accumulate(arch.cpu_type, arch.size);
                 }
@@ -103,9 +103,6 @@ impl BigEndianIo for Metadata {
         let _x0 = u8::read(reader.by_ref())?;
         debug_assert!(_x0 == 1, "x0 {:?}", _x0);
         let arch = u16::read(reader.by_ref())?;
-        if arch != 15 {
-            eprintln!("arch {:#x}", arch);
-        }
         let num_arch = (arch >> 12) & 0xf;
         let mode = u16::read(reader.by_ref())?;
         let mode = mode & MODE_MASK;
@@ -122,14 +119,14 @@ impl BigEndianIo for Metadata {
                 debug_assert!(flag == 1, "flag = {flag}");
                 let num_arch_again = u32::read(reader.by_ref())?;
                 debug_assert!(
-                    num_arch_again.min(2) == num_arch as u32,
+                    num_arch_again.min(MAX_ARCHES as u32) == num_arch as u32,
                     "num_arch = {num_arch}, num_arch_again = {num_arch_again}",
                 );
                 let mut arches = Vec::with_capacity(num_arch_again as usize);
                 for _ in 0..num_arch_again {
                     arches.push(ExeArch::read(reader.by_ref())?);
                 }
-                MetadataExtra::Executable { checksum, arches }
+                MetadataExtra::Executable(Executable { checksum, arches })
             }
             FileType::File => {
                 debug_assert!(num_arch == 0, "num_arch = {num_arch}");
@@ -189,8 +186,11 @@ impl BigEndianIo for Metadata {
             MetadataExtra::File { checksum } => {
                 write_be(writer.by_ref(), *checksum)?;
             }
-            MetadataExtra::Executable { checksum, arches } => {
+            MetadataExtra::Executable(Executable { checksum, arches }) => {
                 write_be(writer.by_ref(), *checksum)?;
+                1_u8.write(writer.by_ref())?;
+                let num_arches = arches.len() as u32;
+                num_arches.write(writer.by_ref())?;
                 for arch in arches.iter() {
                     arch.write(writer.by_ref())?;
                 }
@@ -243,10 +243,17 @@ impl TryFrom<std::fs::Metadata> for Metadata {
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum MetadataExtra {
     File { checksum: u32 },
-    Executable { checksum: u32, arches: Vec<ExeArch> },
+    Executable(Executable),
     Directory,
     Link { checksum: u32, name: CString },
     Device(Device),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct Executable {
+    pub checksum: u32,
+    pub arches: Vec<ExeArch>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,14 +262,20 @@ pub struct Device {
     dev: u32,
 }
 
+impl Device {
+    pub fn rdev(&self) -> u64 {
+        bom_dev_to_libc_dev(self.dev)
+    }
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct ExeArch {
-    cpu_type: u32,
-    cpu_sub_type: u32,
+    pub cpu_type: u32,
+    pub cpu_sub_type: u32,
     // TODO what if the size is u64?
-    size: u32,
-    checksum: u32,
+    pub size: u32,
+    pub checksum: u32,
 }
 
 impl BigEndianIo for ExeArch {
@@ -288,12 +301,6 @@ impl BigEndianIo for ExeArch {
     }
 }
 
-impl Device {
-    pub fn rdev(&self) -> u64 {
-        bom_dev_to_libc_dev(self.dev)
-    }
-}
-
 const fn bom_dev_to_libc_dev(dev: u32) -> libc::dev_t {
     let major = ((dev >> 24) & 0xff) as libc::c_uint;
     let minor = (dev & 0xff_ff_ff) as libc::c_uint;
@@ -303,22 +310,39 @@ const fn bom_dev_to_libc_dev(dev: u32) -> libc::dev_t {
 fn libc_dev_to_bom_dev(dev: libc::dev_t) -> u32 {
     let major = unsafe { libc::major(dev) };
     let minor = unsafe { libc::minor(dev) };
-    ((major << 24) & 0xff) as u32 | (minor & 0xff_ff_ff) as u32
+    ((major & 0xff) << 24) as u32 | (minor & 0xff_ff_ff) as u32
 }
 
 const MODE_MASK: u16 = 0o7777;
+
+/// Max. no. of architectures in flags.
+const MAX_ARCHES: usize = 2;
 
 #[cfg(test)]
 mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
+    use arbtest::arbtest;
 
     use super::*;
+    use crate::test::test_write_read;
     use crate::test::test_write_read_convert;
 
     #[test]
-    fn write_read() {
+    fn write_read_symmetry() {
         test_write_read_convert::<Metadata32, Metadata>();
+        test_write_read::<ExeArch>();
+    }
+
+    #[test]
+    fn bom_to_libc_symmetry() {
+        arbtest(|u| {
+            let expected_bom_dev: u32 = u.arbitrary()?;
+            let libc_dev = bom_dev_to_libc_dev(expected_bom_dev);
+            let actual_bom_dev = libc_dev_to_bom_dev(libc_dev);
+            assert_eq!(expected_bom_dev, actual_bom_dev);
+            Ok(())
+        });
     }
 
     impl<'a> Arbitrary<'a> for Metadata {
@@ -353,6 +377,20 @@ mod tests {
     impl From<Metadata32> for Metadata {
         fn from(other: Metadata32) -> Self {
             other.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for Executable {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut arches = Vec::new();
+            let num_arches = u.int_in_range(1..=0xf)?;
+            for _ in 0..num_arches {
+                arches.push(u.arbitrary()?);
+            }
+            Ok(Executable {
+                checksum: u.arbitrary()?,
+                arches,
+            })
         }
     }
 }

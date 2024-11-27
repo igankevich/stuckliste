@@ -75,6 +75,13 @@ impl Blocks {
         Ok(index)
     }
 
+    pub fn append_null<W: Write + Seek>(&mut self, mut writer: W) -> Result<u32, Error> {
+        let index = self.next_block_index();
+        let offset = writer.stream_position()? as u32;
+        self.blocks.push(Block { offset, len: 0 });
+        Ok(index)
+    }
+
     pub fn next_block_index(&self) -> u32 {
         let index = self.blocks.len();
         index as u32

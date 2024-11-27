@@ -109,3 +109,15 @@ impl BigEndianIo for BomInfoEntry {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test::test_write_read;
+
+    #[test]
+    fn write_read_symmetry() {
+        test_write_read::<BomInfo>();
+        test_write_read::<BomInfoEntry>();
+    }
+}
