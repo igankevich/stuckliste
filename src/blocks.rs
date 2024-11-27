@@ -63,7 +63,7 @@ impl Blocks {
         self.blocks.iter().filter(|b| !b.is_null()).count()
     }
 
-    pub fn write_block<W: Write + Seek, F: FnOnce(&mut W) -> Result<(), Error>>(
+    pub fn append<W: Write + Seek, F: FnOnce(&mut W) -> Result<(), Error>>(
         &mut self,
         writer: W,
         f: F,
@@ -180,13 +180,6 @@ impl BigEndianIo for Block {
         self.len.write(writer.by_ref())?;
         Ok(())
     }
-}
-
-pub trait BlockIo {
-    fn write<W: Write + Seek>(&self, writer: W, blocks: &mut Blocks) -> Result<u32, Error>;
-    fn read(i: u32, file: &[u8], blocks: &mut Blocks) -> Result<Self, Error>
-    where
-        Self: Sized;
 }
 
 #[cfg(test)]

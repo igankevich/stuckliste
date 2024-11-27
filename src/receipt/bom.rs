@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::ffi::OsStr;
 use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
@@ -15,11 +14,14 @@ use std::path::PathBuf;
 
 use crate::io::*;
 use crate::receipt::BomInfo;
+use crate::receipt::Context;
+use crate::receipt::HardLinkTree;
 use crate::receipt::Metadata;
 use crate::receipt::PathComponent;
 use crate::receipt::PathComponentKey;
 use crate::receipt::PathComponentValue;
 use crate::receipt::PathTree;
+use crate::receipt::Size64Tree;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
@@ -52,19 +54,19 @@ impl Receipt {
         // v index
         {
             let paths = Paths::null();
-            let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
             let tree = Tree::new_v_index(i);
-            let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
             let vindex = VIndex::new(i);
-            let i = blocks.write_block(writer.by_ref(), |writer| vindex.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| vindex.write(writer))?;
             named_blocks.insert(V_INDEX.into(), i);
         }
         // hl index
         {
             let paths = Paths::null();
-            let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
             let tree = Tree::null(i);
-            let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
             named_blocks.insert(HL_INDEX.into(), i);
         }
         let mut file_size_64 = HashMap::new();
@@ -79,19 +81,18 @@ impl Receipt {
                 for child in children.iter() {
                     let node = self.tree.nodes().get(child).unwrap();
                     // node metadata
-                    let i = blocks
-                        .write_block(writer.by_ref(), |writer| node.metadata.write(writer))?;
+                    let i = blocks.append(writer.by_ref(), |writer| node.metadata.write(writer))?;
                     if node.metadata.size() > u32::MAX as u64 {
                         file_size_64.insert(i, node.metadata.size());
                     }
                     // node id -> index mapping
-                    let index0 = blocks.write_block(writer.by_ref(), |writer| {
+                    let index0 = blocks.append(writer.by_ref(), |writer| {
                         write_be(writer.by_ref(), node.id)?;
                         write_be(writer.by_ref(), i)?;
                         Ok(())
                     })?;
                     // parent + name
-                    let index1 = blocks.write_block(writer.by_ref(), |writer| {
+                    let index1 = blocks.append(writer.by_ref(), |writer| {
                         write_be(writer.by_ref(), node.parent)?;
                         writer.write_all(node.name.as_os_str().as_bytes())?;
                         writer.write_all(&[0_u8])?;
@@ -118,7 +119,7 @@ impl Receipt {
                 };
             }
             for (j, (parent, last_index, paths)) in all_paths.into_iter().enumerate() {
-                let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+                let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
                 debug_assert!(i == block_index + j as u32);
                 eprintln!("write index {} paths {:?}", i, paths);
                 // if root
@@ -133,9 +134,9 @@ impl Receipt {
                 let num_paths = roots.len() as u32;
                 let mut paths = Paths::from_indices(roots);
                 paths.is_leaf = false;
-                let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+                let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
                 let tree = Tree::new(i, num_paths);
-                let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+                let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
                 named_blocks.insert(PATHS.into(), i);
             }
         };
@@ -144,22 +145,22 @@ impl Receipt {
             let mut indices = Vec::new();
             eprintln!("write file_size_64 {:#?}", file_size_64);
             for (metadata_index, file_size) in file_size_64.into_iter() {
-                let i = blocks.write_block(writer.by_ref(), |writer| file_size.write(writer))?;
-                let j = blocks
-                    .write_block(writer.by_ref(), |writer| write_be(writer, metadata_index))?;
+                let i = blocks.append(writer.by_ref(), |writer| file_size.write(writer))?;
+                let j =
+                    blocks.append(writer.by_ref(), |writer| write_be(writer, metadata_index))?;
                 indices.push((i, j));
             }
             let num_paths = indices.len() as u32;
             let paths = Paths::from_indices(indices);
-            let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
             let tree = Tree::new(i, num_paths);
-            let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
             named_blocks.insert(SIZE_64.into(), i);
         }
         // bom info
         {
             let bom_info = BomInfo::new(&self.tree);
-            let i = blocks.write_block(writer.by_ref(), |writer| bom_info.write(writer))?;
+            let i = blocks.append(writer.by_ref(), |writer| bom_info.write(writer))?;
             named_blocks.insert(BOM_INFO.into(), i);
         }
         // write the header
@@ -225,56 +226,37 @@ impl Receipt {
                 eprintln!("vindex name {:?} block {}: {:?}", name, index1, block_bytes);
             }
         }
+        let mut context = Context::new();
         // block id -> file size
-        let mut file_size_64 = HashMap::new();
         if let Some(index) = named_blocks.remove(SIZE_64) {
-            let tree = Tree::read(blocks.slice(index, &file)?)?;
-            eprintln!("tree {:?} {:?}", SIZE_64, tree);
-            let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
-            eprintln!("size64 paths {:?}", paths);
-            for (index0, index1) in paths.indices.into_iter() {
-                let block_bytes = blocks.slice(index0, &file)?;
-                let file_size = u64::read(&block_bytes[..])?;
-                eprintln!("block {}: {:?}", index0, block_bytes);
-                let block_bytes = blocks.slice(index1, &file)?;
-                eprintln!("block {}: {:?}", index1, block_bytes);
-                let metadata_index = u32::read(&block_bytes[..])?;
+            let tree = Size64Tree::read_block(index, &file, &mut blocks, &mut context)?;
+            let mut file_size_64 = HashMap::new();
+            for (file_size, metadata_index) in tree.into_inner().into_entries() {
                 file_size_64.insert(metadata_index, file_size);
             }
+            eprintln!("file_size64 = {:#?}", file_size_64);
+            context.file_size_64 = file_size_64;
         }
         if let Some(index) = named_blocks.remove(HL_INDEX) {
-            let tree = Tree::read(blocks.slice(index, &file)?)?;
-            eprintln!("tree {:?} {:?}", HL_INDEX, tree);
-            let paths = Paths::read(blocks.slice(tree.child, &file)?)?;
-            eprintln!("hl-index paths {:?}", paths);
-            for (index0, index1) in paths.indices.into_iter() {
-                let block_bytes = blocks.slice(index0, &file)?;
-                let id = u32_read(&block_bytes[..4]);
-                // id points to a tree
-                let tree = Tree::read(blocks.slice(id, &file)?)?;
-                eprintln!("tree {:?} {:?}", "hard-link", tree);
-                let block_bytes = blocks.slice(index1, &file)?;
-                let metadata_index = u32_read(&block_bytes[0..4]);
-                let index = tree.child;
-                let path = Paths::read(blocks.slice(index, &file)?)?;
-                debug_assert!(path.is_leaf);
-                eprintln!("read index {} paths {:?} hard-link", index, path);
-                for (index0, index1) in path.indices.into_iter() {
-                    let block_bytes = blocks.slice(index0, &file)?;
-                    eprintln!("block {}: {:?}", index0, block_bytes);
-                    debug_assert!(block_bytes.is_empty());
-                    let block_bytes = blocks.slice(index1, &file)?;
-                    let name = CStr::from_bytes_with_nul(&block_bytes[..]).map_err(Error::other)?;
-                    let name = OsStr::from_bytes(name.to_bytes());
-                    eprintln!("hard-link {:?} -> {}", name.to_str(), metadata_index);
+            let tree = HardLinkTree::read_block(index, &file, &mut blocks, &mut context)?;
+            let mut hard_links = HashMap::new();
+            for (hard_links_tree, metadata_index) in tree.into_inner().into_entries() {
+                for (_, name) in hard_links_tree.into_inner().into_inner().into_entries() {
+                    hard_links.insert(metadata_index, name);
                 }
             }
+            eprintln!("hard links {:#?}", hard_links);
+            context.hard_links = hard_links;
         }
         // id -> data
         let mut graph = HashMap::new();
         if let Some(index) = named_blocks.remove(PATHS) {
-            let tree =
-                TreeV2::<PathComponentKey, PathComponentValue>::read(index, &file, &mut blocks)?;
+            let tree = TreeV2::<PathComponentKey, PathComponentValue, Context>::read_block(
+                index,
+                &file,
+                &mut blocks,
+                &mut context,
+            )?;
             let mut paths = VecDeque::new();
             paths.push_back((PATHS, tree.into_inner(), index));
             let mut visited = HashSet::new();
@@ -284,9 +266,10 @@ impl Receipt {
                     continue;
                 }
                 match tree_node {
-                    TreeNode::Root { entries } => {
+                    TreeNode::Root { entries, .. } => {
                         for (index, _last_entry) in entries.into_iter() {
-                            let tree_node = TreeNode::read(index, &file, &mut blocks)?;
+                            let tree_node =
+                                TreeNode::read_block(index, &file, &mut blocks, &mut context)?;
                             paths.push_back((c"paths.root", tree_node, index));
                         }
                     }
@@ -302,12 +285,14 @@ impl Receipt {
                         if forward != 0 {
                             let i = forward;
                             // TODO TreeNode::read only once
-                            let tree_node = TreeNode::read(i, &file, &mut blocks)?;
+                            let tree_node =
+                                TreeNode::read_block(i, &file, &mut blocks, &mut context)?;
                             paths.push_back((name, tree_node, i));
                         }
                         if backward != 0 {
                             let i = backward;
-                            let tree_node = TreeNode::read(i, &file, &mut blocks)?;
+                            let tree_node =
+                                TreeNode::read_block(i, &file, &mut blocks, &mut context)?;
                             paths.push_back((name, tree_node, i));
                         }
                     }
@@ -527,20 +512,20 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        //for filename in [
-        //    //"block.bom",
-        //    //"char.bom",
-        //    "dir.bom",
-        //    //"file.bom",
-        //    //"hardlink.bom",
-        //    //"symlink.bom",
-        //    //"exe.bom",
-        //    //"size64.bom",
-        //] {
-        //    Receipt::read(File::open(filename).unwrap()).unwrap();
-        //}
+        for filename in [
+            //"block.bom",
+            //"char.bom",
+            //"dir.bom",
+            //"file.bom",
+            "hardlink.bom",
+            //"symlink.bom",
+            //"exe.bom",
+            //"size64.bom",
+        ] {
+            Receipt::read(File::open(filename).unwrap()).unwrap();
+        }
         //Receipt::read(File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap()).unwrap();
-        Receipt::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
+        //Receipt::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
         //Receipt::read(File::open("cars/0E9C2921-1D9F-4EE8-8E47-A8AB1737DF6E.car").unwrap()).unwrap();
         //for entry in WalkDir::new("boms").into_iter() {
         //    let entry = entry.unwrap();

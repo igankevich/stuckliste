@@ -1,3 +1,4 @@
+mod block_io;
 mod blocks;
 mod bom;
 mod fat;
@@ -9,6 +10,7 @@ pub mod receipt;
 pub mod test;
 mod tree;
 
+pub use self::block_io::*;
 pub(crate) use self::blocks::*;
 pub use self::bom::*;
 pub use self::file_type::*;

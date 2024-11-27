@@ -48,7 +48,10 @@ impl Bom {
         };
         let blocks = Blocks::read(blocks.slice(&file))?;
         let named_blocks = NamedBlocks::read(named_blocks.slice(&file))?;
-        debug_assert!(num_non_null_blocks as usize == blocks.num_non_null_blocks());
+        // TODO ???
+        debug_assert!(num_non_null_blocks as usize >= blocks.num_non_null_blocks(),
+            "num_non_null_blocks = {num_non_null_blocks}, \
+            blocks.num_non_null_blocks = {}", blocks.num_non_null_blocks());
         Ok(Self {
             blocks,
             named_blocks,

@@ -60,6 +60,16 @@ impl BigEndianIo for u64 {
     }
 }
 
+impl BigEndianIo for () {
+    fn read<R: Read>(_reader: R) -> Result<Self, Error> {
+        Ok(())
+    }
+
+    fn write<W: Write>(&self, _writer: W) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
 // TODO remove
 pub(crate) fn write_be<W: Write, T: BigEndianIo>(writer: W, value: T) -> Result<(), Error> {
     value.write(writer)

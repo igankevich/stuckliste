@@ -37,7 +37,7 @@ pub struct Metadata {
     uid: u32,
     gid: u32,
     mtime: u32,
-    size: u64,
+    pub(crate) size: u64,
     pub extra: MetadataExtra,
 }
 

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::CStr;
+use std::ffi::CString;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
@@ -15,24 +16,43 @@ use std::path::PathBuf;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
+use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::Metadata;
 use crate::receipt::MetadataExtra;
+use crate::receipt::Ptr;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
+use crate::TreeV2;
 
 pub struct PathComponentKey {
     id: u32,
     metadata: Metadata,
 }
 
-impl BlockIo for PathComponentKey {
-    fn write<W: Write + Seek>(&self, mut writer: W, blocks: &mut Blocks) -> Result<u32, Error> {
+impl PathComponentKey {
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+}
+
+impl BlockIo<Context> for PathComponentKey {
+    fn write_block<W: Write + Seek>(
+        &self,
+        mut writer: W,
+        blocks: &mut Blocks,
+        context: &mut Context,
+    ) -> Result<u32, Error> {
         Ok(0)
     }
 
-    fn read(i: u32, file: &[u8], blocks: &mut Blocks) -> Result<Self, Error> {
+    fn read_block(
+        i: u32,
+        file: &[u8],
+        blocks: &mut Blocks,
+        context: &mut Context,
+    ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
         let id = u32::read(reader.by_ref())?;
         eprintln!("id {}", id);
@@ -40,11 +60,11 @@ impl BlockIo for PathComponentKey {
         let reader = blocks.slice(i, &file)?;
         let block_len = reader.len();
         let mut reader = std::io::Cursor::new(reader);
-        let metadata = Metadata::read(reader.by_ref())?;
-        // TODO
-        //if let Some(size) = file_size_64.get(&i) {
-        //    metadata.size = *size;
-        //}
+        let mut metadata = Metadata::read(reader.by_ref())?;
+        // TODO move to Metadata?? need to implement BlockIo for Metadata
+        if let Some(size) = context.file_size_64.get(&i) {
+            metadata.size = *size;
+        }
         let unread_bytes = block_len - reader.position() as usize;
         debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
         Ok(Self { id, metadata })
@@ -56,12 +76,22 @@ pub struct PathComponentValue {
     name: OsString,
 }
 
-impl BlockIo for PathComponentValue {
-    fn write<W: Write + Seek>(&self, mut writer: W, blocks: &mut Blocks) -> Result<u32, Error> {
+impl<C> BlockIo<C> for PathComponentValue {
+    fn write_block<W: Write + Seek>(
+        &self,
+        mut writer: W,
+        blocks: &mut Blocks,
+        context: &mut C,
+    ) -> Result<u32, Error> {
         Ok(0)
     }
 
-    fn read(i: u32, file: &[u8], blocks: &mut Blocks) -> Result<Self, Error> {
+    fn read_block(
+        i: u32,
+        file: &[u8],
+        blocks: &mut Blocks,
+        context: &mut C,
+    ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, &file)?;
         eprintln!("block {}: {:?}", i, reader);
         let parent = u32::read(reader.by_ref())?;
@@ -205,6 +235,12 @@ impl PathTree {
         Ok(Self { nodes })
     }
 }
+
+/// File size to metadata block index mapping.
+pub type Size64Tree = TreeV2<u64, u32, Context>;
+
+/// Hard links to metadata block index mapping.
+pub type HardLinkTree = TreeV2<Ptr<TreeV2<(), CString, Context>>, u32, Context>;
 
 #[cfg(test)]
 mod tests {
