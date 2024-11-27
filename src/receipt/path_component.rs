@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::CStr;
-use std::ffi::CString;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
@@ -20,11 +19,9 @@ use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::Metadata;
 use crate::receipt::MetadataExtra;
-use crate::receipt::Ptr;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
-use crate::TreeV2;
 
 pub struct PathComponentKey {
     id: u32,
@@ -235,12 +232,6 @@ impl PathTree {
         Ok(Self { nodes })
     }
 }
-
-/// File size to metadata block index mapping.
-pub type Size64Tree = TreeV2<u64, u32, Context>;
-
-/// Hard links to metadata block index mapping.
-pub type HardLinkTree = TreeV2<Ptr<TreeV2<(), CString, Context>>, u32, Context>;
 
 #[cfg(test)]
 mod tests {

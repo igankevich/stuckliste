@@ -15,13 +15,12 @@ use std::path::PathBuf;
 use crate::io::*;
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
-use crate::receipt::HardLinkTree;
 use crate::receipt::Metadata;
 use crate::receipt::PathComponent;
 use crate::receipt::PathComponentKey;
 use crate::receipt::PathComponentValue;
 use crate::receipt::PathTree;
-use crate::receipt::Size64Tree;
+use crate::receipt::Ptr;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
@@ -229,7 +228,7 @@ impl Receipt {
         let mut context = Context::new();
         // block id -> file size
         if let Some(index) = named_blocks.remove(SIZE_64) {
-            let tree = Size64Tree::read_block(index, &file, &mut blocks, &mut context)?;
+            let tree = FileSizeTree::read_block(index, &file, &mut blocks, &mut context)?;
             let mut file_size_64 = HashMap::new();
             for (file_size, metadata_index) in tree.into_inner().into_entries() {
                 file_size_64.insert(metadata_index, file_size);
@@ -491,12 +490,29 @@ fn u32_read(data: &[u8]) -> u32 {
     u32::from_be_bytes([data[0], data[1], data[2], data[3]])
 }
 
-// Named blocks.
-const V_INDEX: &CStr = c"VIndex";
-const HL_INDEX: &CStr = c"HLIndex";
-const SIZE_64: &CStr = c"Size64";
-const BOM_INFO: &CStr = c"BomInfo";
-const PATHS: &CStr = c"Paths";
+/// Virtual paths (i.e. paths defined with regular expressions).
+pub const V_INDEX: &CStr = c"VIndex";
+
+/// Hard links.
+pub const HL_INDEX: &CStr = c"HLIndex";
+
+/// 64-bit file sizes.
+pub const SIZE_64: &CStr = c"Size64";
+
+/// Per-architecture file statistics.
+pub const BOM_INFO: &CStr = c"BomInfo";
+
+/// File path components tree.
+pub const PATHS: &CStr = c"Paths";
+
+/// File size to metadata block index mapping.
+pub type FileSizeTree = TreeV2<u64, u32, Context>;
+
+/// Hard links to metadata block index mapping.
+pub type HardLinkTree = TreeV2<Ptr<TreeV2<(), CString, Context>>, u32, Context>;
+
+/// File path components tree.
+pub type PathComponentTree = TreeV2<PathComponentKey, PathComponentValue, Context>;
 
 #[cfg(test)]
 mod tests {
