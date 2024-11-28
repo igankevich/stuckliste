@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::io::Error;
@@ -13,20 +11,19 @@ use std::path::PathBuf;
 
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
+use crate::receipt::InvertedTree;
 use crate::receipt::Metadata;
-use crate::receipt::PathComponent;
 use crate::receipt::PathComponentKey;
 use crate::receipt::PathComponentValue;
 use crate::receipt::PathTree;
 use crate::receipt::Ptr;
+use crate::receipt::Tree;
 use crate::receipt::VirtualPathTree;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
 use crate::Bom;
 use crate::NamedBlocks;
-use crate::Tree;
-use crate::TreeNode;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
 pub struct Receipt {
@@ -62,14 +59,9 @@ impl Receipt {
         }
         // paths
         {
-            let paths = PathComponentTree::new(
-                self.tree
-                    .nodes()
-                    .values()
-                    .cloned()
-                    .map(|component| component.into_key_and_value()),
-            );
-            let i = paths.write_block(writer.by_ref(), &mut blocks, &mut context)?;
+            let i = self
+                .tree
+                .write_block(writer.by_ref(), &mut blocks, &mut context)?;
             named_blocks.insert(PATHS.into(), i);
             /*
             let edges = self.tree.edges();
@@ -144,23 +136,8 @@ impl Receipt {
         // size 64
         {
             eprintln!("write file_size_64 {:#?}", context.file_size_64);
-            let file_size_tree =
-                FileSizeTree::new_inverted(std::mem::take(&mut context.file_size_64));
+            let file_size_tree = FileSizeTree::new(std::mem::take(&mut context.file_size_64));
             let i = file_size_tree.write_block(writer.by_ref(), &mut blocks, &mut context)?;
-            /*
-            let mut indices = Vec::new();
-            for (metadata_index, file_size) in file_size_64.into_iter() {
-                let i = blocks.append(writer.by_ref(), |writer| file_size.write(writer))?;
-                let j =
-                    blocks.append(writer.by_ref(), |writer| write_be(writer, metadata_index))?;
-                indices.push((i, j));
-            }
-            let num_paths = indices.len() as u32;
-            let paths = Paths::from_indices(indices);
-            let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
-            let tree = Tree::new(i, num_paths);
-            let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
-            */
             named_blocks.insert(SIZE_64.into(), i);
         }
         // bom info
@@ -170,7 +147,6 @@ impl Receipt {
             named_blocks.insert(BOM_INFO.into(), i);
         }
         // write the header
-        writer.seek(SeekFrom::Start(0))?;
         let header = Bom {
             blocks,
             named_blocks,
@@ -207,7 +183,7 @@ impl Receipt {
         if let Some(index) = named_blocks.remove(SIZE_64) {
             let tree = FileSizeTree::read_block(index, &file, &mut blocks, &mut context)?;
             let mut file_size_64 = HashMap::new();
-            for (file_size, metadata_index) in tree.into_inner().into_entries() {
+            for (metadata_index, file_size) in tree.into_inner().into_entries() {
                 file_size_64.insert(metadata_index, file_size);
             }
             eprintln!("file_size64 = {:#?}", file_size_64);
@@ -225,63 +201,12 @@ impl Receipt {
             context.hard_links = hard_links;
         }
         // id -> data
-        let mut graph = HashMap::new();
-        if let Some(index) = named_blocks.remove(PATHS) {
-            let tree = Tree::<PathComponentKey, PathComponentValue, Context>::read_block(
-                index,
-                &file,
-                &mut blocks,
-                &mut context,
-            )?;
-            let mut paths = VecDeque::new();
-            paths.push_back((PATHS, tree.into_inner(), index));
-            let mut visited = HashSet::new();
-            while let Some((name, tree_node, index)) = paths.pop_front() {
-                if !visited.insert(index) {
-                    //eprintln!("loop {}", index);
-                    continue;
-                }
-                match tree_node {
-                    TreeNode::Root { entries, .. } => {
-                        for (index, _last_entry) in entries.into_iter() {
-                            let tree_node =
-                                TreeNode::read_block(index, &file, &mut blocks, &mut context)?;
-                            paths.push_back((c"paths.root", tree_node, index));
-                        }
-                    }
-                    TreeNode::Node {
-                        entries,
-                        forward,
-                        backward,
-                    } => {
-                        for (path_key, path_value) in entries.into_iter() {
-                            let comp = PathComponent::new(path_key, path_value);
-                            graph.insert(comp.id, comp);
-                        }
-                        if forward != 0 {
-                            let i = forward;
-                            // TODO TreeNode::read only once
-                            let tree_node =
-                                TreeNode::read_block(i, &file, &mut blocks, &mut context)?;
-                            paths.push_back((name, tree_node, i));
-                        }
-                        if backward != 0 {
-                            let i = backward;
-                            let tree_node =
-                                TreeNode::read_block(i, &file, &mut blocks, &mut context)?;
-                            paths.push_back((name, tree_node, i));
-                        }
-                    }
-                }
-                //if name != c"paths.root" {
-                //    debug_assert!(path.forward == 0);
-                //    debug_assert!(path.backward == 0);
-                //}
-            }
-        }
+        let i = named_blocks
+            .remove(PATHS)
+            .ok_or_else(|| Error::other(format!("`{:?}` block not found", PATHS)))?;
+        let tree = PathTree::read_block(i, &file, &mut blocks, &mut context)?;
         debug_assert!(named_blocks.is_empty(), "named blocks {:?}", named_blocks);
-        let tree = PathTree::new(graph);
-        eprintln!("tree {:#?}", tree);
+        eprintln!("paths {:#?}", tree);
         let paths = tree.to_paths()?;
         for (path, metadata) in paths.iter() {
             eprintln!("read path {:?} metadata {:?}", path, metadata);
@@ -443,13 +368,13 @@ pub const BOM_INFO: &CStr = c"BomInfo";
 pub const PATHS: &CStr = c"Paths";
 
 /// File size to metadata block index mapping.
-pub type FileSizeTree = Tree<u64, u32, Context>;
+pub type FileSizeTree = InvertedTree<u64, u32>;
 
 /// Hard links to metadata block index mapping.
-pub type HardLinkTree = Tree<Ptr<Tree<(), CString, Context>>, u32, Context>;
+pub type HardLinkTree = Tree<Ptr<Tree<(), CString>>, u32>;
 
 /// File path components tree.
-pub type PathComponentTree = Tree<PathComponentKey, PathComponentValue, Context>;
+pub type PathComponentTree = Tree<PathComponentKey, PathComponentValue>;
 
 #[cfg(test)]
 mod tests {

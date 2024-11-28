@@ -88,27 +88,28 @@ pub(crate) struct BomInfoEntry {
 impl BigEndianIo for BomInfoEntry {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let cpu_type = u32::read(reader.by_ref())?;
-        let reserved1 = u32::read(reader.by_ref())?;
+        let _x1 = u32::read(reader.by_ref())?;
         let file_size = u32::read(reader.by_ref())?;
-        let reserved2 = u32::read(reader.by_ref())?;
+        let _x2 = u32::read(reader.by_ref())?;
         let entry = BomInfoEntry {
             cpu_type,
             file_size,
         };
-        debug_assert!(reserved1 == 0 && reserved2 == 0, "entry = {entry:?}");
+        debug_assert!(_x1 == DEFAULT_X1 && _x2 == DEFAULT_X2, "entry = {entry:?}");
         Ok(entry)
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        let reserved1 = 0_u32;
-        let reserved2 = 0_u32;
         self.cpu_type.write(writer.by_ref())?;
-        reserved1.write(writer.by_ref())?;
+        DEFAULT_X1.write(writer.by_ref())?;
         self.file_size.write(writer.by_ref())?;
-        reserved2.write(writer.by_ref())?;
+        DEFAULT_X2.write(writer.by_ref())?;
         Ok(())
     }
 }
+
+const DEFAULT_X1: u32 = 0;
+const DEFAULT_X2: u32 = 0;
 
 #[cfg(test)]
 mod tests {

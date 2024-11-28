@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
@@ -19,9 +20,11 @@ use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::Metadata;
 use crate::receipt::MetadataExtra;
+use crate::receipt::Tree;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
+use crate::TreeNode;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
@@ -267,6 +270,78 @@ impl PathTree {
         Ok(Self { nodes })
     }
 }
+
+impl BlockIo<Context> for PathTree {
+    fn write_block<W: Write + Seek>(
+        &self,
+        writer: W,
+        blocks: &mut Blocks,
+        context: &mut Context,
+    ) -> Result<u32, Error> {
+        let paths = PathComponentTree::new(
+            self.nodes()
+                .values()
+                .cloned()
+                .map(|component| component.into_key_and_value()),
+        );
+        paths.write_block(writer, blocks, context)
+    }
+
+    fn read_block(
+        i: u32,
+        file: &[u8],
+        blocks: &mut Blocks,
+        context: &mut Context,
+    ) -> Result<Self, Error> {
+        let mut graph = HashMap::new();
+        let tree = PathComponentTree::read_block(i, &file, blocks, context)?;
+        let mut paths = VecDeque::new();
+        paths.push_back((tree.into_inner(), i));
+        let mut visited = HashSet::new();
+        while let Some((tree_node, index)) = paths.pop_front() {
+            if !visited.insert(index) {
+                //eprintln!("loop {}", index);
+                continue;
+            }
+            match tree_node {
+                TreeNode::Root { entries, .. } => {
+                    for (index, _last_entry) in entries.into_iter() {
+                        let tree_node = TreeNode::read_block(index, &file, blocks, context)?;
+                        paths.push_back((tree_node, index));
+                    }
+                }
+                TreeNode::Node {
+                    entries,
+                    forward,
+                    backward,
+                } => {
+                    for (path_key, path_value) in entries.into_iter() {
+                        let comp = PathComponent::new(path_key, path_value);
+                        graph.insert(comp.id, comp);
+                    }
+                    if forward != 0 {
+                        let i = forward;
+                        // TODO TreeNode::read only once
+                        let tree_node = TreeNode::read_block(i, &file, blocks, context)?;
+                        paths.push_back((tree_node, i));
+                    }
+                    if backward != 0 {
+                        let i = backward;
+                        let tree_node = TreeNode::read_block(i, &file, blocks, context)?;
+                        paths.push_back((tree_node, i));
+                    }
+                }
+            }
+            //if name != c"paths.root" {
+            //    debug_assert!(path.forward == 0);
+            //    debug_assert!(path.backward == 0);
+            //}
+        }
+        Ok(PathTree::new(graph))
+    }
+}
+
+type PathComponentTree = Tree<PathComponentKey, PathComponentValue>;
 
 #[cfg(test)]
 mod tests {

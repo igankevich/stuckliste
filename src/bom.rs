@@ -64,10 +64,10 @@ impl Bom {
     }
 
     pub fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
-        // append blocks at the end
-        let position = writer.seek(SeekFrom::End(0))?;
+        // append blocks at the current position
+        let position = writer.stream_position()?;
         if position < Bom::LEN as u64 {
-            // skip the header
+            // ensure that we have enough space for the header
             writer.seek(SeekFrom::Start(Bom::LEN as u64))?;
         }
         let named_blocks =

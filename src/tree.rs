@@ -8,6 +8,9 @@ use crate::io::*;
 use crate::BlockIo;
 use crate::Blocks;
 
+/// Some trees in BOM files are inverted, i.e. swap values with keys.
+pub type InvertedTree<K, V, C> = Tree<V, K, C>;
+
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Tree<K, V, C> {
@@ -35,18 +38,17 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> Tree<K, V, C> {
         }
     }
 
-    /// Some trees in BOM files are inverted, i.e. swap values with keys.
-    pub fn new_inverted<I: IntoIterator<Item = (V, K)>>(entries: I) -> Self {
-        // TODO group by block size
-        let entries = entries.into_iter().map(|(k, v)| (v, k)).collect();
-        Self {
-            root: TreeNode::Node {
-                forward: 0,
-                backward: 0,
-                entries,
-            },
-        }
-    }
+    //pub fn new_inverted<I: IntoIterator<Item = (V, K)>>(entries: I) -> Self {
+    //    // TODO group by block size
+    //    let entries = entries.into_iter().map(|(k, v)| (v, k)).collect();
+    //    Self {
+    //        root: TreeNode::Node {
+    //            forward: 0,
+    //            backward: 0,
+    //            entries,
+    //        },
+    //    }
+    //}
 
     pub fn into_inner(self) -> TreeNode<K, V, C> {
         self.root
