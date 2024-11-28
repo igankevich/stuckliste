@@ -1,6 +1,7 @@
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Seek;
+use std::io::SeekFrom;
 use std::io::Write;
 
 use crate::BigEndianIo;
@@ -28,6 +29,7 @@ impl Bom {
             return Err(ErrorKind::UnexpectedEof.into());
         }
         if file[..BOM_MAGIC.len()] != BOM_MAGIC[..] {
+            eprintln!("magic {:x?}", &file[..BOM_MAGIC.len()]);
             return Err(Error::other("not a bom store"));
         }
         let version = u32_read(&file[8..12]);
@@ -49,9 +51,12 @@ impl Bom {
         let blocks = Blocks::read(blocks.slice(&file))?;
         let named_blocks = NamedBlocks::read(named_blocks.slice(&file))?;
         // TODO ???
-        debug_assert!(num_non_null_blocks as usize >= blocks.num_non_null_blocks(),
+        debug_assert!(
+            num_non_null_blocks as usize >= blocks.num_non_null_blocks(),
             "num_non_null_blocks = {num_non_null_blocks}, \
-            blocks.num_non_null_blocks = {}", blocks.num_non_null_blocks());
+            blocks.num_non_null_blocks = {}",
+            blocks.num_non_null_blocks()
+        );
         Ok(Self {
             blocks,
             named_blocks,
@@ -59,9 +64,17 @@ impl Bom {
     }
 
     pub fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
+        // append blocks at the end
+        let position = writer.seek(SeekFrom::End(0))?;
+        if position < Bom::LEN as u64 {
+            // skip the header
+            writer.seek(SeekFrom::Start(Bom::LEN as u64))?;
+        }
         let named_blocks =
             Block::from_write(writer.by_ref(), |writer| self.named_blocks.write(writer))?;
         let blocks = Block::from_write(writer.by_ref(), |writer| self.blocks.write(writer))?;
+        // write the header at the beginning
+        writer.rewind()?;
         writer.write_all(&BOM_MAGIC[..])?;
         Self::VERSION.write(writer.by_ref())?;
         (self.blocks.num_non_null_blocks() as u32).write(writer.by_ref())?;
@@ -83,3 +96,26 @@ const BOM_MAGIC: [u8; 8] = *b"BOMStore";
 /// Bom length without padding.
 const REAL_HEADER_LEN: usize = 32;
 const HEADER_PADDING: usize = Bom::LEN - REAL_HEADER_LEN;
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use arbtest::arbtest;
+
+    use super::*;
+
+    #[test]
+    fn write_read() {
+        arbtest(|u| {
+            let expected: Bom = u.arbitrary()?;
+            let mut writer = Cursor::new(Vec::new());
+            expected.write(&mut writer).unwrap();
+            let bytes = writer.into_inner();
+            eprintln!("magic {:x?}", &bytes);
+            let actual = Bom::read(&bytes[..]).unwrap();
+            assert_eq!(expected, actual);
+            Ok(())
+        });
+    }
+}

@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 
-use crate::TreeV2;
-
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Context {
@@ -23,4 +21,4 @@ impl Context {
     }
 }
 
-pub type Tree<K, V> = TreeV2<K, V, Context>;
+pub type Tree<K, V> = crate::Tree<K, V, Context>;

@@ -25,8 +25,8 @@ use crate::BlockIo;
 use crate::Blocks;
 use crate::Bom;
 use crate::NamedBlocks;
+use crate::Tree;
 use crate::TreeNode;
-use crate::TreeV2;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
 pub struct Receipt {
@@ -227,7 +227,7 @@ impl Receipt {
         // id -> data
         let mut graph = HashMap::new();
         if let Some(index) = named_blocks.remove(PATHS) {
-            let tree = TreeV2::<PathComponentKey, PathComponentValue, Context>::read_block(
+            let tree = Tree::<PathComponentKey, PathComponentValue, Context>::read_block(
                 index,
                 &file,
                 &mut blocks,
@@ -443,13 +443,13 @@ pub const BOM_INFO: &CStr = c"BomInfo";
 pub const PATHS: &CStr = c"Paths";
 
 /// File size to metadata block index mapping.
-pub type FileSizeTree = TreeV2<u64, u32, Context>;
+pub type FileSizeTree = Tree<u64, u32, Context>;
 
 /// Hard links to metadata block index mapping.
-pub type HardLinkTree = TreeV2<Ptr<TreeV2<(), CString, Context>>, u32, Context>;
+pub type HardLinkTree = Tree<Ptr<Tree<(), CString, Context>>, u32, Context>;
 
 /// File path components tree.
-pub type PathComponentTree = TreeV2<PathComponentKey, PathComponentValue, Context>;
+pub type PathComponentTree = Tree<PathComponentKey, PathComponentValue, Context>;
 
 #[cfg(test)]
 mod tests {
@@ -459,8 +459,6 @@ mod tests {
     use arbtest::arbtest;
 
     use super::*;
-    use crate::test::test_write_read;
-    use crate::Block;
 
     #[test]
     fn bom_read() {
@@ -494,22 +492,12 @@ mod tests {
 
     #[test]
     fn write_read() {
-        //test_write_read::<Bom>();
-        test_write_read::<NamedBlocks>();
-        test_write_read::<Blocks>();
-        test_write_read::<Block>();
-        //test_write_read::<VirtualPathTree>();
-        //test_write_read::<Tree>();
-        //test_write_read::<Paths>();
-    }
-
-    #[test]
-    fn bom_write_read() {
         arbtest(|u| {
             let expected: Receipt = u.arbitrary()?;
             let mut writer = Cursor::new(Vec::new());
             expected.write(&mut writer).unwrap();
             let bytes = writer.into_inner();
+            eprintln!("magic {:x?}", &bytes[..8]);
             let actual = Receipt::read(&bytes[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())

@@ -192,11 +192,18 @@ impl BigEndianIo for Block {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test::test_write_read;
+
+    #[test]
+    fn write_read() {
+        test_write_read::<Blocks>();
+        test_write_read::<Block>();
+    }
 
     impl Blocks {
         fn print_unread_blocks(&self) {
             for i in self.unread_blocks.iter() {
-                eprintln!("unread block {}: {:?}", i, self.blocks[*i]);
+                eprintln!("unread block {}: {:?}", i, self.blocks.get(*i));
             }
         }
     }

@@ -92,3 +92,14 @@ impl BigEndianIo for NamedBlocks {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test::test_write_read;
+
+    #[test]
+    fn write_read() {
+        test_write_read::<NamedBlocks>();
+    }
+}

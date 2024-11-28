@@ -10,11 +10,11 @@ use crate::Blocks;
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-pub struct TreeV2<K, V, C> {
+pub struct Tree<K, V, C> {
     root: TreeNode<K, V, C>,
 }
 
-impl<C, K: BlockIo<C>, V: BlockIo<C>> TreeV2<K, V, C> {
+impl<C, K: BlockIo<C>, V: BlockIo<C>> Tree<K, V, C> {
     const VERSION: u32 = 1;
 
     pub fn new_leaf() -> Self {
@@ -53,7 +53,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> TreeV2<K, V, C> {
     }
 }
 
-impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeV2<K, V, C> {
+impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for Tree<K, V, C> {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
