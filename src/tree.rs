@@ -3,6 +3,8 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
 use std::marker::PhantomData;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 use crate::io::*;
 use crate::BlockIo;
@@ -350,9 +352,90 @@ fn collect_n<T, I: Iterator<Item = T>>(iter: &mut I, n: usize) -> Vec<T> {
     items
 }
 
+#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+pub struct TreeBased<I, K, V, C>(I, PhantomData<C>)
+where
+    I: IntoIterator<Item = (K, V)> + Clone + From<Vec<(K, V)>>,
+    <I as IntoIterator>::IntoIter: ExactSizeIterator,
+    K: BigEndianIo,
+    V: BigEndianIo;
+
+impl<I, K, V, C> Deref for TreeBased<I, K, V, C>
+where
+    I: IntoIterator<Item = (K, V)> + Clone + From<Vec<(K, V)>>,
+    <I as IntoIterator>::IntoIter: ExactSizeIterator,
+    K: BigEndianIo,
+    V: BigEndianIo,
+{
+    type Target = I;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<I, K, V, C> DerefMut for TreeBased<I, K, V, C>
+where
+    I: IntoIterator<Item = (K, V)> + Clone + From<Vec<(K, V)>>,
+    <I as IntoIterator>::IntoIter: ExactSizeIterator,
+    K: BigEndianIo,
+    V: BigEndianIo,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<I, K, V, C> BlockIo<C> for TreeBased<I, K, V, C>
+where
+    I: IntoIterator<Item = (K, V)> + Clone + From<Vec<(K, V)>>,
+    <I as IntoIterator>::IntoIter: ExactSizeIterator,
+    K: BigEndianIo,
+    V: BigEndianIo,
+{
+    fn write_block<W: Write + Seek>(
+        &self,
+        mut writer: W,
+        blocks: &mut Blocks,
+        context: &mut C,
+    ) -> Result<u32, Error> {
+        let tree = Tree::<K, V, C>::new(self.0.clone(), 4096, writer.by_ref(), blocks, context)?;
+        tree.write_block(writer.by_ref(), blocks, context)
+    }
+
+    fn read_block(
+        i: u32,
+        file: &[u8],
+        blocks: &mut Blocks,
+        context: &mut C,
+    ) -> Result<Self, Error> {
+        let tree = Tree::<K, V, C>::read_block(i, file, blocks, context)?;
+        let mut entries = Vec::new();
+        for (k, v) in tree.into_inner().into_entries() {
+            entries.push((k, v));
+        }
+        Ok(Self(entries.into(), Default::default()))
+    }
+}
+
 const TREE_MAGIC: [u8; 4] = *b"tree";
 const NODE_HEADER_LEN: usize = 2 + 2 + 4 + 4;
 const ENTRY_LEN: usize = 4 + 4;
 
 /// The size of the block that can hold one entry maximum.
 const MIN_BLOCK_LEN: usize = NODE_HEADER_LEN + ENTRY_LEN;
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::receipt::Context;
+    use crate::test::block_io_symmetry;
+
+    #[test]
+    fn write_read_symmetry() {
+        block_io_symmetry::<TreeBased<Vec<((), ())>, (), (), Context>>();
+        // TODO large tree
+    }
+}

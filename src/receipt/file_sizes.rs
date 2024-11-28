@@ -61,7 +61,7 @@ impl BlockIo<Context> for FileSizes64 {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<Self, Error> {
-        let tree = FileSizeTree::read_block(i, &file, blocks, context)?;
+        let tree = FileSizeTree::read_block(i, file, blocks, context)?;
         let mut file_size_64 = HashMap::new();
         for (file_size, metadata_index) in tree.into_inner().into_entries() {
             file_size_64.insert(metadata_index, file_size);
