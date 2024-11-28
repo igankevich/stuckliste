@@ -86,6 +86,11 @@ impl Blocks {
         let index = self.blocks.len();
         index as u32
     }
+
+    pub fn last_block_index(&self) -> Option<u32> {
+        let len = self.blocks.len();
+        (len != 0).then_some(len as u32 - 1)
+    }
 }
 
 impl BigEndianIo for Blocks {

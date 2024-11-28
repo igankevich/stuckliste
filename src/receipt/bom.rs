@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
-use std::ffi::CString;
 use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
@@ -11,13 +10,10 @@ use std::path::PathBuf;
 
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
-use crate::receipt::InvertedTree;
+use crate::receipt::FileSizes64;
+use crate::receipt::HardLinks;
 use crate::receipt::Metadata;
-use crate::receipt::PathComponentKey;
-use crate::receipt::PathComponentValue;
 use crate::receipt::PathTree;
-use crate::receipt::Ptr;
-use crate::receipt::Tree;
 use crate::receipt::VirtualPathTree;
 use crate::BigEndianIo;
 use crate::BlockIo;
@@ -53,7 +49,8 @@ impl Receipt {
         }
         // hl index
         {
-            let hard_links = HardLinkTree::new_leaf();
+            eprintln!("write hard links {:#?}", context.hard_links);
+            let hard_links = std::mem::take(&mut context.hard_links);
             let i = hard_links.write_block(writer.by_ref(), &mut blocks, &mut context)?;
             named_blocks.insert(HL_INDEX.into(), i);
         }
@@ -136,8 +133,8 @@ impl Receipt {
         // size 64
         {
             eprintln!("write file_size_64 {:#?}", context.file_size_64);
-            let file_size_tree = FileSizeTree::new(std::mem::take(&mut context.file_size_64));
-            let i = file_size_tree.write_block(writer.by_ref(), &mut blocks, &mut context)?;
+            let file_size_64 = std::mem::take(&mut context.file_size_64);
+            let i = file_size_64.write_block(writer.by_ref(), &mut blocks, &mut context)?;
             named_blocks.insert(SIZE_64.into(), i);
         }
         // bom info
@@ -181,22 +178,11 @@ impl Receipt {
         }
         // block id -> file size
         if let Some(index) = named_blocks.remove(SIZE_64) {
-            let tree = FileSizeTree::read_block(index, &file, &mut blocks, &mut context)?;
-            let mut file_size_64 = HashMap::new();
-            for (metadata_index, file_size) in tree.into_inner().into_entries() {
-                file_size_64.insert(metadata_index, file_size);
-            }
-            eprintln!("file_size64 = {:#?}", file_size_64);
+            let file_size_64 = FileSizes64::read_block(index, &file, &mut blocks, &mut context)?;
             context.file_size_64 = file_size_64;
         }
         if let Some(index) = named_blocks.remove(HL_INDEX) {
-            let tree = HardLinkTree::read_block(index, &file, &mut blocks, &mut context)?;
-            let mut hard_links = HashMap::new();
-            for (hard_links_tree, metadata_index) in tree.into_inner().into_entries() {
-                for (_, name) in hard_links_tree.into_inner().into_inner().into_entries() {
-                    hard_links.insert(metadata_index, name);
-                }
-            }
+            let hard_links = HardLinks::read_block(index, &file, &mut blocks, &mut context)?;
             eprintln!("hard links {:#?}", hard_links);
             context.hard_links = hard_links;
         }
@@ -215,143 +201,6 @@ impl Receipt {
     }
 }
 
-/*
-#[derive(Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-struct Tree {
-    child: u32,
-    block_size: u32,
-    num_paths: u32,
-}
-
-impl Tree {
-    const VERSION: u32 = 1;
-
-    fn new_v_index(child: u32) -> Self {
-        Self {
-            child,
-            block_size: 128,
-            num_paths: 0,
-        }
-    }
-
-    fn null(child: u32) -> Self {
-        Self {
-            child,
-            block_size: 4096,
-            num_paths: 0,
-        }
-    }
-
-    fn new(child: u32, num_paths: u32) -> Self {
-        Self {
-            child,
-            block_size: 4096,
-            num_paths,
-        }
-    }
-}
-
-impl BigEndianIo for Tree {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let mut magic = [0_u8; 4];
-        reader.read_exact(&mut magic[..])?;
-        if TREE_MAGIC[..] != magic[..] {
-            return Err(Error::other("invalid tree magic"));
-        }
-        let version = u32::read(reader.by_ref())?;
-        if version != Self::VERSION {
-            return Err(Error::other(format!(
-                "unsupported tree version: {}",
-                version
-            )));
-        }
-        let child = u32::read(reader.by_ref())?;
-        let block_size = u32::read(reader.by_ref())?;
-        let num_paths = u32::read(reader.by_ref())?;
-        let _x = u8::read(reader.by_ref())?;
-        Ok(Self {
-            child,
-            block_size,
-            num_paths,
-        })
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        writer.write_all(&TREE_MAGIC[..])?;
-        write_be(writer.by_ref(), Self::VERSION)?;
-        write_be(writer.by_ref(), self.child)?;
-        write_be(writer.by_ref(), self.block_size)?;
-        write_be(writer.by_ref(), self.num_paths)?;
-        0_u8.write(writer.by_ref())?;
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-struct Paths {
-    forward: u32,
-    backward: u32,
-    indices: Vec<(u32, u32)>,
-    // TODO is root?
-    is_leaf: bool,
-}
-
-impl Paths {
-    fn null() -> Self {
-        Self::from_indices(Default::default())
-    }
-
-    fn from_indices(indices: Vec<(u32, u32)>) -> Self {
-        Self {
-            forward: 0,
-            backward: 0,
-            indices,
-            is_leaf: true,
-        }
-    }
-}
-
-impl BigEndianIo for Paths {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let is_leaf = u16::read(reader.by_ref())? != 0;
-        let count = u16::read(reader.by_ref())?;
-        let forward = u32::read(reader.by_ref())?;
-        let backward = u32::read(reader.by_ref())?;
-        let mut indices = Vec::new();
-        for _ in 0..count {
-            let index0 = u32::read(reader.by_ref())?;
-            let index1 = u32::read(reader.by_ref())?;
-            indices.push((index0, index1));
-        }
-        Ok(Self {
-            forward,
-            backward,
-            indices,
-            is_leaf,
-        })
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        let is_leaf: u16 = if self.is_leaf { 1 } else { 0 };
-        let count = self.indices.len();
-        if count > u16::MAX as usize {
-            return Err(Error::other("too many path indices"));
-        }
-        is_leaf.write(writer.by_ref())?;
-        (count as u16).write(writer.by_ref())?;
-        write_be(writer.by_ref(), self.forward)?;
-        write_be(writer.by_ref(), self.backward)?;
-        for (index0, index1) in self.indices.iter() {
-            write_be(writer.by_ref(), *index0)?;
-            write_be(writer.by_ref(), *index1)?;
-        }
-        Ok(())
-    }
-}
-*/
-
 /// Virtual paths (i.e. paths defined with regular expressions).
 pub const V_INDEX: &CStr = c"VIndex";
 
@@ -367,15 +216,6 @@ pub const BOM_INFO: &CStr = c"BomInfo";
 /// File path components tree.
 pub const PATHS: &CStr = c"Paths";
 
-/// File size to metadata block index mapping.
-pub type FileSizeTree = InvertedTree<u64, u32>;
-
-/// Hard links to metadata block index mapping.
-pub type HardLinkTree = Tree<Ptr<Tree<(), CString>>, u32>;
-
-/// File path components tree.
-pub type PathComponentTree = Tree<PathComponentKey, PathComponentValue>;
-
 #[cfg(test)]
 mod tests {
     use std::fs::File;
@@ -387,22 +227,22 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        //for filename in [
-        //    //"block.bom",
-        //    //"char.bom",
-        //    //"dir.bom",
-        //    //"file.bom",
-        //    "hardlink.bom",
-        //    //"symlink.bom",
-        //    //"exe.bom",
-        //    //"size64.bom",
-        //] {
-        //    Receipt::read(File::open(filename).unwrap()).unwrap();
-        //}
-        Receipt::read(
-            File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
-        )
-        .unwrap();
+        for filename in [
+            //"block.bom",
+            //"char.bom",
+            //"dir.bom",
+            //"file.bom",
+            //"hardlink.bom",
+            //"symlink.bom",
+            //"exe.bom",
+            "size64.bom",
+        ] {
+            Receipt::read(File::open(filename).unwrap()).unwrap();
+        }
+        //Receipt::read(
+        //    File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
+        //)
+        //.unwrap();
         //Receipt::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
         //Receipt::read(File::open("cars/0E9C2921-1D9F-4EE8-8E47-A8AB1737DF6E.car").unwrap()).unwrap();
         //for entry in WalkDir::new("boms").into_iter() {

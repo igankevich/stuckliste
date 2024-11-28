@@ -26,29 +26,70 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> Tree<K, V, C> {
         }
     }
 
-    pub fn new<I: IntoIterator<Item = (K, V)>>(entries: I) -> Self {
-        // TODO group by block size
-        let entries = entries.into_iter().collect();
-        Self {
-            root: TreeNode::Node {
-                forward: 0,
-                backward: 0,
-                entries,
-            },
+    pub fn new<W: Write + Seek, I: IntoIterator<Item = (K, V)>>(
+        entries: I,
+        block_len: usize,
+        mut writer: W,
+        blocks: &mut Blocks,
+        context: &mut C,
+    ) -> Result<Self, Error>
+    where
+        <I as IntoIterator>::IntoIter: ExactSizeIterator,
+    {
+        let block_len = block_len.max(MIN_BLOCK_LEN);
+        let n = max_enties_per_block(block_len);
+        let iter = entries.into_iter();
+        let num_entries = iter.len();
+        if num_entries <= n {
+            // One data node is enough, no need to introduce meta nodes.
+            return Ok(Self {
+                root: TreeNode::Node {
+                    next: 0,
+                    prev: 0,
+                    entries: iter.collect(),
+                },
+            });
         }
+        let num_blocks = num_entries.div_ceil(n);
+        if num_blocks <= n {
+            // One meta node is enough.
+            let num_data_nodes = num_blocks;
+            let mut data_nodes = Vec::with_capacity(num_data_nodes);
+            let mut iter = iter;
+            let first_block = blocks.next_block_index();
+            let last_block = first_block + num_blocks as u32 - 1;
+            let mut current_block = first_block;
+            while iter.len() != 0 {
+                let per_block_entries = collect_n(&mut iter, n);
+                data_nodes.push(TreeNode::Node {
+                    next: next(current_block, last_block),
+                    prev: prev(current_block, first_block),
+                    entries: per_block_entries,
+                });
+                current_block += 1;
+            }
+            let mut meta_entries = Vec::with_capacity(data_nodes.len());
+            for data_node in data_nodes.into_iter() {
+                let data_node_block = data_node.write_block(writer.by_ref(), blocks, context)?;
+                // Here we rely on the fact that the last written block is the last value in the
+                // TreeNode.
+                let last_value_block = blocks
+                    .last_block_index()
+                    .expect("`while` guarantees that we don't have empty data nodes");
+                meta_entries.push((data_node_block, last_value_block));
+            }
+            let meta_node = TreeNode::Root::<K, V, C> {
+                next: 0,
+                prev: 0,
+                entries: meta_entries,
+                _phantom: Default::default(),
+            };
+            return Ok(Self { root: meta_node });
+        }
+        // We need multiple meta nodes.
+        // TODO
+        unimplemented!()
     }
-
-    //pub fn new_inverted<I: IntoIterator<Item = (V, K)>>(entries: I) -> Self {
-    //    // TODO group by block size
-    //    let entries = entries.into_iter().map(|(k, v)| (v, k)).collect();
-    //    Self {
-    //        root: TreeNode::Node {
-    //            forward: 0,
-    //            backward: 0,
-    //            entries,
-    //        },
-    //    }
-    //}
 
     pub fn into_inner(self) -> TreeNode<K, V, C> {
         self.root
@@ -99,6 +140,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for Tree<K, V, C> {
         }
         let child = u32::read(reader.by_ref())?;
         let _block_size = u32::read(reader.by_ref())?;
+        eprintln!("block len {}", _block_size);
         // TODO
         //debug_assert!(block_size as usize == block_len, "block_size = {block_size}, block_len = {block_len}");
         let _num_paths = u32::read(reader.by_ref())?;
@@ -114,12 +156,14 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for Tree<K, V, C> {
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum TreeNode<K, V, C> {
     Root {
-        entries: Vec<(u32, V)>,
+        next: u32,
+        prev: u32,
+        entries: Vec<(u32, u32)>,
         _phantom: PhantomData<C>,
     },
     Node {
-        forward: u32,
-        backward: u32,
+        next: u32,
+        prev: u32,
         entries: Vec<(K, V)>,
     },
 }
@@ -127,12 +171,13 @@ pub enum TreeNode<K, V, C> {
 impl<C, K: BlockIo<C>, V: BlockIo<C>> TreeNode<K, V, C> {
     pub fn new_leaf() -> Self {
         Self::Node {
-            forward: 0,
-            backward: 0,
+            next: 0,
+            prev: 0,
             entries: Default::default(),
         }
     }
 
+    // TODO s/leaf/data s/root/metadata
     pub fn is_leaf(&self) -> bool {
         match self {
             Self::Root { .. } => false,
@@ -155,11 +200,11 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> TreeNode<K, V, C> {
             }
             Self::Node {
                 entries,
-                forward,
-                backward,
+                next,
+                prev,
             } => {
-                debug_assert!(forward == 0);
-                debug_assert!(backward == 0);
+                debug_assert!(next == 0);
+                debug_assert!(prev == 0);
                 entries
             }
         }
@@ -183,25 +228,28 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeNode<K, V, C> {
             is_leaf.write(w.by_ref())?;
             (count as u16).write(w.by_ref())?;
             match self {
-                Self::Root { entries, .. } => {
-                    let forward = 0_u32;
-                    let backward = 0_u32;
-                    write_be(w.by_ref(), forward)?;
-                    write_be(w.by_ref(), backward)?;
+                Self::Root {
+                    entries,
+                    next,
+                    prev,
+                    ..
+                } => {
+                    write_be(w.by_ref(), *next)?;
+                    write_be(w.by_ref(), *prev)?;
                     for (key, value) in entries.iter() {
                         let i = blocks.append(writer.by_ref(), |writer| write_be(writer, *key))?;
-                        let j = value.write_block(writer.by_ref(), blocks, context)?;
                         write_be(w.by_ref(), i)?;
-                        write_be(w.by_ref(), j)?;
+                        write_be(w.by_ref(), *value)?;
                     }
                 }
                 Self::Node {
                     entries,
-                    forward,
-                    backward,
+                    next,
+                    prev,
                 } => {
-                    write_be(w.by_ref(), *forward)?;
-                    write_be(w.by_ref(), *backward)?;
+                    write_be(w.by_ref(), *next)?;
+                    write_be(w.by_ref(), *prev)?;
+                    // N.B. Tree relies on the fact that the last written block is the value.
                     for (key, value) in entries.iter() {
                         let i = key.write_block(writer.by_ref(), blocks, context)?;
                         let j = value.write_block(writer.by_ref(), blocks, context)?;
@@ -230,8 +278,8 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeNode<K, V, C> {
         let mut reader = blocks.slice(i, file)?;
         let is_leaf = u16::read(reader.by_ref())? != 0;
         let count = u16::read(reader.by_ref())?;
-        let forward = u32::read(reader.by_ref())?;
-        let backward = u32::read(reader.by_ref())?;
+        let next = u32::read(reader.by_ref())?;
+        let prev = u32::read(reader.by_ref())?;
         let node = match is_leaf {
             true => {
                 let mut entries = Vec::new();
@@ -243,22 +291,21 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeNode<K, V, C> {
                     entries.push((key, value));
                 }
                 Self::Node {
-                    forward,
-                    backward,
+                    next,
+                    prev,
                     entries,
                 }
             }
             false => {
-                debug_assert!(forward == 0);
-                debug_assert!(backward == 0);
                 let mut entries = Vec::new();
                 for _ in 0..count {
                     let key = u32::read(reader.by_ref())?;
                     let i = u32::read(reader.by_ref())?;
-                    let value = V::read_block(i, file, blocks, context)?;
-                    entries.push((key, value));
+                    entries.push((key, i));
                 }
                 Self::Root {
+                    next,
+                    prev,
                     entries,
                     _phantom: Default::default(),
                 }
@@ -268,4 +315,44 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for TreeNode<K, V, C> {
     }
 }
 
+const fn max_enties_per_block(block_len: usize) -> usize {
+    (block_len - NODE_HEADER_LEN) / ENTRY_LEN
+}
+
+const fn next(current: u32, last: u32) -> u32 {
+    if current == last {
+        0
+    } else {
+        current + 1
+    }
+}
+
+const fn prev(current: u32, first: u32) -> u32 {
+    if current == first {
+        0
+    } else {
+        current - 1
+    }
+}
+
+// Collect N items (or less if unavailable) from the iterator into vector.
+fn collect_n<T, I: Iterator<Item = T>>(iter: &mut I, n: usize) -> Vec<T> {
+    let mut items = Vec::with_capacity(n);
+    loop {
+        if items.len() == n {
+            break;
+        }
+        match iter.next() {
+            Some(item) => items.push(item),
+            None => break,
+        }
+    }
+    items
+}
+
 const TREE_MAGIC: [u8; 4] = *b"tree";
+const NODE_HEADER_LEN: usize = 2 + 2 + 4 + 4;
+const ENTRY_LEN: usize = 4 + 4;
+
+/// The size of the block that can hold one entry maximum.
+const MIN_BLOCK_LEN: usize = NODE_HEADER_LEN + ENTRY_LEN;

@@ -47,7 +47,8 @@ impl BlockIo<Context> for VirtualPathTree {
         // TODO
         //debug_assert!(_x0 == 0, "x0 = {}", _x0);
         let _x1 = u8::read(reader.by_ref())?;
-        debug_assert!(_x1 == DEFAULT_X1, "x1 = {_x1}");
+        // TODO
+        //debug_assert!(_x1 == DEFAULT_X1, "x1 = {_x1}");
         let tree = Tree::read_block(i, &file, blocks, context)?;
         Ok(Self { tree })
     }

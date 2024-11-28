@@ -171,6 +171,8 @@ pub struct PathTree {
 }
 
 impl PathTree {
+    const BLOCK_LEN: usize = 4096;
+
     pub fn new(nodes: HashMap<u32, PathComponent>) -> Self {
         Self { nodes }
     }
@@ -274,7 +276,7 @@ impl PathTree {
 impl BlockIo<Context> for PathTree {
     fn write_block<W: Write + Seek>(
         &self,
-        writer: W,
+        mut writer: W,
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
@@ -283,7 +285,11 @@ impl BlockIo<Context> for PathTree {
                 .values()
                 .cloned()
                 .map(|component| component.into_key_and_value()),
-        );
+            Self::BLOCK_LEN,
+            writer.by_ref(),
+            blocks,
+            context,
+        )?;
         paths.write_block(writer, blocks, context)
     }
 
@@ -312,29 +318,29 @@ impl BlockIo<Context> for PathTree {
                 }
                 TreeNode::Node {
                     entries,
-                    forward,
-                    backward,
+                    next,
+                    prev,
                 } => {
                     for (path_key, path_value) in entries.into_iter() {
                         let comp = PathComponent::new(path_key, path_value);
                         graph.insert(comp.id, comp);
                     }
-                    if forward != 0 {
-                        let i = forward;
+                    if next != 0 {
+                        let i = next;
                         // TODO TreeNode::read only once
                         let tree_node = TreeNode::read_block(i, &file, blocks, context)?;
                         paths.push_back((tree_node, i));
                     }
-                    if backward != 0 {
-                        let i = backward;
+                    if prev != 0 {
+                        let i = prev;
                         let tree_node = TreeNode::read_block(i, &file, blocks, context)?;
                         paths.push_back((tree_node, i));
                     }
                 }
             }
             //if name != c"paths.root" {
-            //    debug_assert!(path.forward == 0);
-            //    debug_assert!(path.backward == 0);
+            //    debug_assert!(path.next == 0);
+            //    debug_assert!(path.prev == 0);
             //}
         }
         Ok(PathTree::new(graph))
@@ -357,6 +363,7 @@ mod tests {
     fn write_read_symmetry() {
         block_io_symmetry::<PathComponentKey>();
         block_io_symmetry::<PathComponentValue>();
+        block_io_symmetry::<PathTree>();
     }
 
     impl<'a> Arbitrary<'a> for PathTree {

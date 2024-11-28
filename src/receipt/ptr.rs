@@ -12,6 +12,10 @@ use crate::Blocks;
 pub struct Ptr<T>(T);
 
 impl<T> Ptr<T> {
+    pub fn new(value: T) -> Self {
+        Self(value)
+    }
+
     pub fn into_inner(self) -> T {
         self.0
     }

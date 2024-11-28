@@ -1,14 +1,14 @@
-use std::collections::HashMap;
-use std::ffi::CString;
+use crate::receipt::FileSizes64;
+use crate::receipt::HardLinks;
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Context {
-    /// Metadata block index to file size mapping.
-    pub file_size_64: HashMap<u32, u64>,
+    /// 64-bit file sizes.
+    pub file_size_64: FileSizes64,
 
     /// Metadata block index to path mapping.
-    pub hard_links: HashMap<u32, CString>,
+    pub hard_links: HardLinks,
 }
 // TODO add blocks?
 
