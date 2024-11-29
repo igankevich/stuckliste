@@ -21,5 +21,4 @@ impl Context {
     }
 }
 
-pub type Tree<K, V> = crate::Tree<K, V, Context>;
-pub type InvertedTree<K, V> = crate::InvertedTree<K, V, Context>;
+pub type VecTree<K, V> = crate::VecTree<K, V, Context>;

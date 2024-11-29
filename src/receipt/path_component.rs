@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
@@ -20,11 +19,10 @@ use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::Metadata;
 use crate::receipt::MetadataExtra;
-use crate::receipt::Tree;
+use crate::receipt::VecTree;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
-use crate::TreeNode;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
@@ -276,7 +274,7 @@ impl PathTree {
 impl BlockIo<Context> for PathTree {
     fn write_block<W: Write + Seek>(
         &self,
-        mut writer: W,
+        writer: W,
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
@@ -284,12 +282,10 @@ impl BlockIo<Context> for PathTree {
             self.nodes()
                 .values()
                 .cloned()
-                .map(|component| component.into_key_and_value()),
+                .map(|component| component.into_key_and_value())
+                .collect(),
             Self::BLOCK_LEN,
-            writer.by_ref(),
-            blocks,
-            context,
-        )?;
+        );
         paths.write_block(writer, blocks, context)
     }
 
@@ -299,55 +295,20 @@ impl BlockIo<Context> for PathTree {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<Self, Error> {
-        let mut graph = HashMap::new();
         let tree = PathComponentTree::read_block(i, &file, blocks, context)?;
-        let mut paths = VecDeque::new();
-        paths.push_back((tree.into_inner(), i));
-        let mut visited = HashSet::new();
-        while let Some((tree_node, index)) = paths.pop_front() {
-            if !visited.insert(index) {
-                //eprintln!("loop {}", index);
-                continue;
-            }
-            match tree_node {
-                TreeNode::Root { entries, .. } => {
-                    for (index, _last_entry) in entries.into_iter() {
-                        let tree_node = TreeNode::read_block(index, &file, blocks, context)?;
-                        paths.push_back((tree_node, index));
-                    }
-                }
-                TreeNode::Node {
-                    entries,
-                    next,
-                    prev,
-                } => {
-                    for (path_key, path_value) in entries.into_iter() {
-                        let comp = PathComponent::new(path_key, path_value);
-                        graph.insert(comp.id, comp);
-                    }
-                    if next != 0 {
-                        let i = next;
-                        // TODO TreeNode::read only once
-                        let tree_node = TreeNode::read_block(i, &file, blocks, context)?;
-                        paths.push_back((tree_node, i));
-                    }
-                    if prev != 0 {
-                        let i = prev;
-                        let tree_node = TreeNode::read_block(i, &file, blocks, context)?;
-                        paths.push_back((tree_node, i));
-                    }
-                }
-            }
-            //if name != c"paths.root" {
-            //    debug_assert!(path.next == 0);
-            //    debug_assert!(path.prev == 0);
-            //}
-        }
+        let graph = tree
+            .into_inner()
+            .into_iter()
+            .map(|(k, v)| {
+                let comp = PathComponent::new(k, v);
+                (comp.id, comp)
+            })
+            .collect();
         Ok(PathTree::new(graph))
     }
 }
 
-type PathComponentTree = Tree<PathComponentKey, PathComponentValue>;
+type PathComponentTree = VecTree<PathComponentKey, PathComponentValue>;
 
 #[cfg(test)]
 mod tests {

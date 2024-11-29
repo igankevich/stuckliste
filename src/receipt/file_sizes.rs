@@ -6,7 +6,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 use crate::receipt::Context;
-use crate::receipt::Tree;
+use crate::receipt::VecTree;
 use crate::BlockIo;
 use crate::Blocks;
 
@@ -45,12 +45,9 @@ impl BlockIo<Context> for FileSizes64 {
         context: &mut Context,
     ) -> Result<u32, Error> {
         let file_size_tree = FileSizeTree::new(
-            self.0.iter().map(|(k, v)| (*v, *k)),
+            self.0.iter().map(|(k, v)| (*v, *k)).collect(),
             Self::BLOCK_LEN,
-            writer.by_ref(),
-            blocks,
-            context,
-        )?;
+        );
         let i = file_size_tree.write_block(writer.by_ref(), blocks, context)?;
         Ok(i)
     }
@@ -62,16 +59,14 @@ impl BlockIo<Context> for FileSizes64 {
         context: &mut Context,
     ) -> Result<Self, Error> {
         let tree = FileSizeTree::read_block(i, file, blocks, context)?;
-        let mut file_size_64 = HashMap::new();
-        for (file_size, metadata_index) in tree.into_inner().into_entries() {
-            file_size_64.insert(metadata_index, file_size);
-        }
-        Ok(Self(file_size_64))
+        Ok(Self(
+            tree.into_inner().into_iter().map(|(k, v)| (v, k)).collect(),
+        ))
     }
 }
 
 /// Key is file size, valus is metadata block index.
-type FileSizeTree = Tree<u64, u32>;
+type FileSizeTree = VecTree<u64, u32>;
 
 #[cfg(test)]
 mod tests {

@@ -5,7 +5,7 @@ use std::io::Seek;
 use std::io::Write;
 
 use crate::receipt::Context;
-use crate::receipt::Tree;
+use crate::receipt::VecTree;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
@@ -14,7 +14,7 @@ use crate::Blocks;
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct VirtualPathTree {
-    tree: Tree<Option<Tree<(), CString>>, CString>,
+    tree: VecTree<Option<VecTree<(), CString>>, CString>,
 }
 
 impl VirtualPathTree {
@@ -22,7 +22,7 @@ impl VirtualPathTree {
 
     pub fn new() -> Self {
         Self {
-            tree: Tree::new_leaf(),
+            tree: Default::default(),
         }
     }
 }
@@ -49,7 +49,7 @@ impl BlockIo<Context> for VirtualPathTree {
         let _x1 = u8::read(reader.by_ref())?;
         // TODO
         //debug_assert!(_x1 == DEFAULT_X1, "x1 = {_x1}");
-        let tree = Tree::read_block(i, &file, blocks, context)?;
+        let tree = VecTree::read_block(i, &file, blocks, context)?;
         Ok(Self { tree })
     }
 

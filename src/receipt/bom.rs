@@ -60,75 +60,6 @@ impl Receipt {
                 .tree
                 .write_block(writer.by_ref(), &mut blocks, &mut context)?;
             named_blocks.insert(PATHS.into(), i);
-            /*
-            let edges = self.tree.edges();
-            eprintln!("write edges {:?}", edges);
-            let mut roots = Vec::new();
-            let mut all_paths = Vec::new();
-            for (parent, children) in edges.iter() {
-                let mut indices = Vec::new();
-                for child in children.iter() {
-                    let node = self.tree.nodes().get(child).unwrap();
-                    // node metadata
-                    let i = blocks.append(writer.by_ref(), |writer| node.metadata.write(writer))?;
-                    if node.metadata.size() > u32::MAX as u64 {
-                        file_size_64.insert(i, node.metadata.size());
-                    }
-                    // node id -> index mapping
-                    let index0 = blocks.append(writer.by_ref(), |writer| {
-                        write_be(writer.by_ref(), node.id)?;
-                        write_be(writer.by_ref(), i)?;
-                        Ok(())
-                    })?;
-                    // parent + name
-                    let index1 = blocks.append(writer.by_ref(), |writer| {
-                        write_be(writer.by_ref(), node.parent)?;
-                        writer.write_all(node.name.as_os_str().as_bytes())?;
-                        writer.write_all(&[0_u8])?;
-                        Ok(())
-                    })?;
-                    indices.push((index0, index1));
-                }
-                let last_index = indices.last().cloned().unwrap();
-                let paths = Paths::from_indices(indices);
-                all_paths.push((parent, last_index, paths));
-            }
-            let block_index = blocks.next_block_index();
-            let n = all_paths.len();
-            for (i, (_, _, paths)) in all_paths.iter_mut().enumerate() {
-                paths.backward = if i == 0 {
-                    0
-                } else {
-                    block_index + (i - 1) as u32
-                };
-                paths.forward = if i == n - 1 {
-                    0
-                } else {
-                    block_index + (i + 1) as u32
-                };
-            }
-            for (j, (parent, last_index, paths)) in all_paths.into_iter().enumerate() {
-                let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
-                debug_assert!(i == block_index + j as u32);
-                eprintln!("write index {} paths {:?}", i, paths);
-                // if root
-                if *parent == 0 {
-                    // take the last file (can be any file probably)
-                    let index1 = last_index.1;
-                    roots.push((i, index1));
-                }
-            }
-            // paths (is_leaf == 0)
-            {
-                let num_paths = roots.len() as u32;
-                let mut paths = Paths::from_indices(roots);
-                paths.is_leaf = false;
-                let i = blocks.append(writer.by_ref(), |writer| paths.write(writer))?;
-                let tree = Tree::new(i, num_paths);
-                let i = blocks.append(writer.by_ref(), |writer| tree.write(writer))?;
-                named_blocks.insert(PATHS.into(), i);
-            }
-            */
         };
         // size 64
         {
@@ -227,22 +158,22 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        for filename in [
-            //"block.bom",
-            //"char.bom",
-            //"dir.bom",
-            //"file.bom",
-            //"hardlink.bom",
-            //"symlink.bom",
-            //"exe.bom",
-            "size64.bom",
-        ] {
-            Receipt::read(File::open(filename).unwrap()).unwrap();
-        }
-        //Receipt::read(
-        //    File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
-        //)
-        //.unwrap();
+        //for filename in [
+        //    //"block.bom",
+        //    //"char.bom",
+        //    //"dir.bom",
+        //    //"file.bom",
+        //    "hardlink.bom",
+        //    //"symlink.bom",
+        //    //"exe.bom",
+        //    //"size64.bom",
+        //] {
+        //    Receipt::read(File::open(filename).unwrap()).unwrap();
+        //}
+        Receipt::read(
+            File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
+        )
+        .unwrap();
         //Receipt::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
         //Receipt::read(File::open("cars/0E9C2921-1D9F-4EE8-8E47-A8AB1737DF6E.car").unwrap()).unwrap();
         //for entry in WalkDir::new("boms").into_iter() {
