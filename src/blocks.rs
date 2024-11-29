@@ -45,9 +45,6 @@ impl Blocks {
             "read block index {} block {:?} slice {:?}",
             index, block, slice
         );
-        if slice.len() > 4096 {
-            eprintln!("BIG BLOCK");
-        }
         Ok(slice)
     }
 
