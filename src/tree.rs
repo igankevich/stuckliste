@@ -5,6 +5,8 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
 use std::marker::PhantomData;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 use crate::io::*;
 use crate::BlockIo;
@@ -41,6 +43,20 @@ impl<K, V, C> Default for VecTree<K, V, C> {
             block_len: 4096,
             phantom: Default::default(),
         }
+    }
+}
+
+impl<K, V, C> Deref for VecTree<K, V, C> {
+    type Target = Vec<(K, V)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl<K, V, C> DerefMut for VecTree<K, V, C> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.entries
     }
 }
 
