@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::io::Error;
 use std::io::Read;
@@ -13,7 +12,7 @@ use crate::receipt::Context;
 use crate::receipt::FileSizes64;
 use crate::receipt::HardLinks;
 use crate::receipt::Metadata;
-use crate::receipt::PathTree;
+use crate::receipt::PathComponentVec;
 use crate::receipt::VirtualPathTree;
 use crate::BigEndianIo;
 use crate::BlockIo;
@@ -23,16 +22,16 @@ use crate::NamedBlocks;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
 pub struct Receipt {
-    tree: PathTree,
+    tree: PathComponentVec,
 }
 
 impl Receipt {
-    pub fn paths(&self) -> Result<HashMap<PathBuf, Metadata>, Error> {
+    pub fn paths(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
         self.tree.to_paths()
     }
 
     pub fn from_directory<P: AsRef<Path>>(directory: P) -> Result<Self, Error> {
-        let tree = PathTree::from_directory(directory)?;
+        let tree = PathComponentVec::from_directory(directory)?;
         Ok(Self { tree })
     }
 
@@ -117,7 +116,7 @@ impl Receipt {
         let i = named_blocks
             .remove(PATHS)
             .ok_or_else(|| Error::other(format!("`{:?}` block not found", PATHS)))?;
-        let tree = PathTree::read_block(i, &file, &mut blocks, &mut context)?;
+        let tree = PathComponentVec::read_block(i, &file, &mut blocks, &mut context)?;
         debug_assert!(named_blocks.is_empty(), "named blocks {:?}", named_blocks);
         eprintln!("paths {:#?}", tree);
         let paths = tree.to_paths()?;
@@ -154,14 +153,14 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        {
-            let filename = "exe-path-only.bom";
-            Receipt::read(File::open(filename).unwrap()).unwrap();
-        }
-        //Receipt::read(
-        //    File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
-        //)
-        //.unwrap();
+        //{
+        //    let filename = "exe-path-only.bom";
+        //    Receipt::read(File::open(filename).unwrap()).unwrap();
+        //}
+        Receipt::read(
+            File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
+        )
+        .unwrap();
         //Receipt::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
         //Receipt::read(File::open("cars/0E9C2921-1D9F-4EE8-8E47-A8AB1737DF6E.car").unwrap()).unwrap();
         //for entry in WalkDir::new("boms").into_iter() {

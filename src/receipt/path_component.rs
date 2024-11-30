@@ -8,6 +8,8 @@ use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -15,6 +17,7 @@ use std::path::PathBuf;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
+use crate::receipt::BomInfo;
 use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::Metadata;
@@ -119,11 +122,10 @@ impl BlockIo<Context> for PathComponentValue {
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct PathComponent {
-    // TODO make private
-    pub id: u32,
-    pub parent: u32,
-    pub metadata: Metadata,
-    pub name: CString,
+    id: u32,
+    parent: u32,
+    metadata: Metadata,
+    name: CString,
 }
 
 impl PathComponent {
@@ -147,29 +149,38 @@ impl PathComponent {
         };
         (key, value)
     }
+
+    pub(crate) fn accumulate(&self, stats: &mut BomInfo) {
+        self.metadata.accumulate(stats);
+    }
 }
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct PathTree {
-    nodes: HashMap<u32, PathComponent>,
+pub struct PathComponentVec {
+    components: Vec<PathComponent>,
 }
 
-impl PathTree {
+impl PathComponentVec {
     const BLOCK_LEN: usize = 4096;
 
-    pub fn new(nodes: HashMap<u32, PathComponent>) -> Self {
-        Self { nodes }
+    pub fn new(components: Vec<PathComponent>) -> Self {
+        Self { components }
     }
 
     fn path(&self, mut id: u32) -> Result<PathBuf, Error> {
+        let component_by_id = self
+            .components
+            .iter()
+            .map(|component| (component.id, component))
+            .collect::<HashMap<_, _>>();
         let mut visited = HashSet::new();
         let mut components = Vec::new();
         loop {
             if !visited.insert(id) {
                 return Err(Error::other("loop"));
             }
-            let Some(node) = self.nodes.get(&id) else {
+            let Some(node) = component_by_id.get(&id) else {
                 break;
             };
             let name = OsStr::from_bytes(node.name.to_bytes());
@@ -181,31 +192,19 @@ impl PathTree {
         Ok(path)
     }
 
-    pub fn to_paths(&self) -> Result<HashMap<PathBuf, Metadata>, Error> {
-        let mut paths = HashMap::new();
-        for (id, node) in self.nodes.iter() {
-            let path = self.path(*id)?;
-            paths.insert(path, node.metadata.clone());
+    pub fn to_paths(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
+        let mut paths = Vec::new();
+        for component in self.components.iter() {
+            let path = self.path(component.id)?;
+            paths.push((path, component.metadata.clone()));
         }
         Ok(paths)
     }
 
-    pub fn nodes(&self) -> &HashMap<u32, PathComponent> {
-        &self.nodes
-    }
-
-    // parent -> children
-    pub fn edges(&self) -> HashMap<u32, Vec<u32>> {
-        let mut edges: HashMap<u32, Vec<u32>> = HashMap::new();
-        for node in self.nodes.values() {
-            edges.entry(node.parent).or_default().push(node.id);
-        }
-        edges
-    }
-
     pub fn from_directory<P: AsRef<Path>>(directory: P) -> Result<Self, Error> {
         let directory = directory.as_ref();
-        let mut nodes: HashMap<PathBuf, PathComponent> = HashMap::new();
+        let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
+        // Id starts with 1.
         let mut id: u32 = 1;
         for entry in WalkDir::new(directory).into_iter() {
             let entry = entry?;
@@ -236,7 +235,7 @@ impl PathTree {
                 _ => {}
             }
             let parent = match dirname {
-                Some(d) => nodes.get(d).map(|node| node.id).unwrap_or(0),
+                Some(d) => components.get(d).map(|node| node.id).unwrap_or(0),
                 None => 0,
             };
             let name = match basename {
@@ -250,15 +249,15 @@ impl PathTree {
                 name,
                 metadata,
             };
-            nodes.insert(relative_path, node);
+            components.insert(relative_path, node);
             id += 1;
         }
-        let nodes = nodes.into_values().map(|node| (node.id, node)).collect();
-        Ok(Self { nodes })
+        let components = components.into_values().collect();
+        Ok(Self { components })
     }
 }
 
-impl BlockIo<Context> for PathTree {
+impl BlockIo<Context> for PathComponentVec {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
@@ -266,8 +265,7 @@ impl BlockIo<Context> for PathTree {
         context: &mut Context,
     ) -> Result<u32, Error> {
         let paths = PathComponentTree::new(
-            self.nodes()
-                .values()
+            self.iter()
                 .cloned()
                 .map(|component| component.into_key_and_value())
                 .collect(),
@@ -286,12 +284,23 @@ impl BlockIo<Context> for PathTree {
         let graph = tree
             .into_inner()
             .into_iter()
-            .map(|(k, v)| {
-                let comp = PathComponent::new(k, v);
-                (comp.id, comp)
-            })
+            .map(|(k, v)| PathComponent::new(k, v))
             .collect();
-        Ok(PathTree::new(graph))
+        Ok(PathComponentVec::new(graph))
+    }
+}
+
+impl Deref for PathComponentVec {
+    type Target = Vec<PathComponent>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.components
+    }
+}
+
+impl DerefMut for PathComponentVec {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.components
     }
 }
 
@@ -310,11 +319,11 @@ mod tests {
     #[test]
     fn write_read_symmetry() {
         block_io_symmetry::<PathComponentKey>();
-        //block_io_symmetry::<PathComponentValue>();
-        //block_io_symmetry::<PathTree>();
+        block_io_symmetry::<PathComponentValue>();
+        block_io_symmetry::<PathComponentVec>();
     }
 
-    impl<'a> Arbitrary<'a> for PathTree {
+    impl<'a> Arbitrary<'a> for PathComponentVec {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             use cpio_test::FileType::*;
             let directory = DirectoryOfFiles::new(
@@ -328,7 +337,7 @@ mod tests {
                 ],
                 u,
             )?;
-            let nodes = PathTree::from_directory(directory.path()).unwrap();
+            let nodes = PathComponentVec::from_directory(directory.path()).unwrap();
             Ok(nodes)
         }
     }

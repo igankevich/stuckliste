@@ -2,7 +2,7 @@ use std::io::Error;
 use std::io::Read;
 use std::io::Write;
 
-use crate::receipt::PathTree;
+use crate::receipt::PathComponentVec;
 use crate::BigEndianIo;
 
 /// File paths statistics.
@@ -18,13 +18,13 @@ pub struct BomInfo {
 impl BomInfo {
     const VERSION: u32 = 1;
 
-    pub fn new(tree: &PathTree) -> Self {
+    pub fn new(tree: &PathComponentVec) -> Self {
         let mut stats = Self {
             num_paths: 0,
             entries: Default::default(),
         };
-        for component in tree.nodes().values() {
-            component.metadata.accumulate(&mut stats);
+        for component in tree.iter() {
+            component.accumulate(&mut stats);
         }
         stats
     }
