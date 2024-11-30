@@ -20,6 +20,7 @@ use walkdir::WalkDir;
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
 use crate::receipt::CrcReader;
+use crate::receipt::Link;
 use crate::receipt::Metadata;
 use crate::receipt::MetadataExtra;
 use crate::receipt::VecTree;
@@ -207,7 +208,6 @@ impl PathComponentVec {
             if entry_path == Path::new("") {
                 continue;
             }
-            eprintln!("entry {:?}", entry_path);
             let relative_path = Path::new(".").join(entry_path);
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
@@ -217,9 +217,9 @@ impl PathComponentVec {
                 MetadataExtra::File {
                     ref mut checksum, ..
                 }
-                | MetadataExtra::Link {
+                | MetadataExtra::Link(Link {
                     ref mut checksum, ..
-                } => {
+                }) => {
                     let crc_reader = CrcReader::new(File::open(entry.path())?);
                     *checksum = crc_reader.digest()?;
                 }
@@ -302,7 +302,7 @@ mod tests {
 
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
-    use cpio_test::DirectoryOfFiles;
+    use random_dir::DirBuilder;
 
     use super::*;
     use crate::test::block_io_symmetry;
@@ -316,19 +316,17 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for PathComponentVec {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            use cpio_test::FileType::*;
-            let directory = DirectoryOfFiles::new(
-                &[
+            use random_dir::FileType::*;
+            let directory = DirBuilder::new()
+                .file_types([
                     Regular,
                     Directory,
                     BlockDevice,
                     CharDevice,
                     Symlink,
                     HardLink,
-                ],
-                false,
-                u,
-            )?;
+                ])
+                .create(u)?;
             let nodes = PathComponentVec::from_directory(directory.path()).unwrap();
             Ok(nodes)
         }

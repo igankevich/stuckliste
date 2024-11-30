@@ -41,10 +41,6 @@ impl Blocks {
         #[cfg(test)]
         self.unread_blocks.remove(&(index as usize));
         let slice = block.slice(file);
-        eprintln!(
-            "read block index {} block {:?} slice {:?}",
-            index, block, slice
-        );
         Ok(slice)
     }
 
@@ -67,7 +63,6 @@ impl Blocks {
     ) -> Result<u32, Error> {
         let index = self.next_block_index();
         let block = Block::from_write(writer, f)?;
-        //eprintln!("write block index {} block {:?}", index, block);
         self.blocks.push(block);
         Ok(index)
     }
@@ -153,7 +148,6 @@ impl Block {
     pub fn slice<'a>(&self, file: &'a [u8]) -> &'a [u8] {
         let i = self.offset as usize;
         let j = i + self.len as usize;
-        //eprintln!("read block {:?}", &file[i..j]);
         &file[i..j]
     }
 

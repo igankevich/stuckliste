@@ -2,6 +2,7 @@ mod bom;
 mod bom_info;
 mod context;
 mod crc;
+mod fat;
 mod file_sizes;
 mod file_type;
 mod hard_links;

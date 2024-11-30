@@ -13,6 +13,7 @@ use std::time::SystemTime;
 
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
+use crate::receipt::EntryType;
 use crate::receipt::FileType;
 use crate::BigEndianIo;
 use crate::BlockIo;
@@ -32,7 +33,14 @@ pub struct Metadata {
 impl Metadata {
     pub fn file_type(&self) -> FileType {
         // TODO
+        //use MetadataExtra::*;
+        //match self.extra {
+        //    PathOnly { entry_type } => ,
         FileType::new(self.mode).unwrap_or(FileType::Regular)
+    }
+
+    pub fn entry_type(&self) -> EntryType {
+        self.extra.entry_type()
     }
 
     pub fn mode(&self) -> u16 {
@@ -68,7 +76,7 @@ impl Metadata {
             MetadataExtra::File { checksum } => checksum,
             MetadataExtra::Executable(Executable { checksum, .. }) => checksum,
             MetadataExtra::Directory => 0,
-            MetadataExtra::Link { checksum, .. } => checksum,
+            MetadataExtra::Link(Link { checksum, .. }) => checksum,
             MetadataExtra::Device(Device { .. }) => 0,
             MetadataExtra::PathOnly { .. } => 0,
         }
@@ -109,7 +117,7 @@ impl Metadata {
     }
 
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let kind: u8 = u8::read_be(reader.by_ref())?;
+        let entry_type = EntryType::read_be(reader.by_ref())?;
         let _x0 = u8::read_be(reader.by_ref())?;
         debug_assert!(_x0 == 1, "x0 {:?}", _x0);
         let flags = u16::read_be(reader.by_ref())?;
@@ -121,13 +129,12 @@ impl Metadata {
                 gid: 0,
                 mtime: 0,
                 size: 0,
-                extra: MetadataExtra::PathOnly { file_type: kind },
+                extra: MetadataExtra::PathOnly { entry_type },
             };
             return Ok(metadata);
         }
         let binary_type = get_binary_type(flags);
         let mode = u16::read_be(reader.by_ref())?;
-        eprintln!("read mode {:#o}", mode);
         let uid = u32::read_be(reader.by_ref())?;
         let gid = u32::read_be(reader.by_ref())?;
         let mtime = u32::read_be(reader.by_ref())?;
@@ -135,6 +142,7 @@ impl Metadata {
         let _x1 = u8::read_be(reader.by_ref())?;
         debug_assert!(_x1 == 1, "x1 {:?}", _x1);
         let file_type = FileType::new(mode)?;
+        debug_assert!(file_type.to_entry_type() == entry_type);
         let extra = match file_type {
             FileType::Regular if binary_type != BinaryType::Unknown => {
                 let checksum = u32::read_be(reader.by_ref())?;
@@ -165,11 +173,6 @@ impl Metadata {
                 MetadataExtra::Directory
             }
             FileType::Symlink => {
-                debug_assert!(
-                    binary_type == BinaryType::Unknown,
-                    "unexpected binary type {:?}",
-                    binary_type
-                );
                 let checksum = u32::read_be(reader.by_ref())?;
                 let name_len = u32::read_be(reader.by_ref())?;
                 debug_assert!(
@@ -182,10 +185,10 @@ impl Metadata {
                 reader.read_exact(&mut name[..])?;
                 let name = CString::from_vec_with_nul(name).map_err(Error::other)?;
                 let name = OsStr::from_bytes(name.to_bytes());
-                MetadataExtra::Link {
+                MetadataExtra::Link(Link {
                     checksum,
                     name: name.into(),
-                }
+                })
             }
             FileType::CharDevice | FileType::BlockDevice => {
                 debug_assert!(
@@ -210,7 +213,7 @@ impl Metadata {
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        self.file_type().to_entry_type().write_be(writer.by_ref())?;
+        self.entry_type().write_be(writer.by_ref())?;
         1_u8.write_be(writer.by_ref())?;
         let flags = self.flags();
         flags.write_be(writer.by_ref())?;
@@ -237,7 +240,7 @@ impl Metadata {
                 }
             }
             MetadataExtra::Directory => {}
-            MetadataExtra::Link { checksum, name } => {
+            MetadataExtra::Link(Link { checksum, name }) => {
                 checksum.write_be(writer.by_ref())?;
                 let name_bytes = name.as_os_str().as_bytes();
                 // +1 because of the nul byte
@@ -298,10 +301,10 @@ impl TryFrom<std::fs::Metadata> for Metadata {
         let extra = match kind {
             FileType::Regular => MetadataExtra::File { checksum: 0 },
             FileType::Directory => MetadataExtra::Directory,
-            FileType::Symlink => MetadataExtra::Link {
+            FileType::Symlink => MetadataExtra::Link(Link {
                 checksum: 0,
                 name: Default::default(),
-            },
+            }),
             FileType::CharDevice | FileType::BlockDevice => MetadataExtra::Device(Device {
                 dev: libc_dev_to_bom_dev(other.rdev()),
             }),
@@ -323,9 +326,22 @@ pub enum MetadataExtra {
     File { checksum: u32 },
     Executable(Executable),
     Directory,
-    Link { checksum: u32, name: PathBuf },
+    Link(Link),
     Device(Device),
-    PathOnly { file_type: u8 },
+    PathOnly { entry_type: EntryType },
+}
+
+impl MetadataExtra {
+    fn entry_type(&self) -> EntryType {
+        use MetadataExtra::*;
+        match self {
+            File { .. } | Executable { .. } => EntryType::File,
+            Link { .. } => EntryType::Link,
+            Directory => EntryType::Directory,
+            Device { .. } => EntryType::Device,
+            PathOnly { entry_type } => *entry_type,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +361,13 @@ impl Device {
     pub fn rdev(&self) -> u64 {
         bom_dev_to_libc_dev(self.dev)
     }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct Link {
+    pub checksum: u32,
+    pub name: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -400,10 +423,7 @@ fn get_binary_type(flags: u16) -> BinaryType {
         UNKNOWN => BinaryType::Unknown,
         EXECUTABLE => BinaryType::Executable,
         FAT => BinaryType::Fat,
-        other => {
-            eprintln!("unknown binary type: {}", other);
-            BinaryType::Unknown
-        }
+        _ => BinaryType::Unknown,
     }
 }
 
@@ -463,8 +483,9 @@ mod tests {
                     extra,
                 })
             } else {
+                let file_type = to_file_type(extra.entry_type());
                 Ok(Self {
-                    mode: u.arbitrary::<u16>()?,
+                    mode: u.int_in_range(0_u16..=0o7777_u16)? | file_type.to_mode_bits(),
                     uid: u.arbitrary()?,
                     gid: u.arbitrary()?,
                     mtime: u.arbitrary()?,
@@ -492,8 +513,9 @@ mod tests {
                     extra,
                 }))
             } else {
+                let file_type = to_file_type(extra.entry_type());
                 Ok(Self(Metadata {
-                    mode: u.arbitrary::<u16>()?,
+                    mode: u.int_in_range(0_u16..=0o7777_u16)? | file_type.to_mode_bits(),
                     uid: u.arbitrary()?,
                     gid: u.arbitrary()?,
                     mtime: u.arbitrary()?,
@@ -517,10 +539,29 @@ mod tests {
             for _ in 0..num_arches {
                 arches.push(u.arbitrary()?);
             }
-            Ok(Executable {
+            Ok(Self {
                 checksum: u.arbitrary()?,
                 arches,
             })
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for Link {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            Ok(Self {
+                checksum: u.arbitrary()?,
+                name: OsStr::from_bytes(u.arbitrary::<CString>()?.to_bytes()).into(),
+            })
+        }
+    }
+
+    const fn to_file_type(entry_type: EntryType) -> FileType {
+        use EntryType::*;
+        match entry_type {
+            File => FileType::Regular,
+            Directory => FileType::Directory,
+            Link => FileType::Symlink,
+            Device => FileType::BlockDevice,
         }
     }
 }

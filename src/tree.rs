@@ -77,7 +77,6 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 let value = value.write_block(writer.by_ref(), blocks, context)?;
                 raw_entries.push((key, value));
             }
-            eprintln!("data entries: {:?}", raw_entries);
             let data_node = RawTreeNode {
                 next: 0,
                 prev: 0,
@@ -91,12 +90,6 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
             let max_data_nodes_per_meta_node = num_data_nodes.div_ceil(num_meta_nodes);
             let mut iter = self.entries.iter();
             let mut meta_nodes = Vec::with_capacity(num_meta_nodes);
-            eprintln!("num meta nodes {}", num_meta_nodes);
-            eprintln!("num data nodes {}", num_data_nodes);
-            eprintln!(
-                "max data nodes per meta node {}",
-                max_data_nodes_per_meta_node
-            );
             for _ in 0..num_meta_nodes {
                 let mut data_nodes = Vec::with_capacity(max_data_nodes_per_meta_node);
                 for _ in 0..max_data_nodes_per_meta_node {
@@ -141,7 +134,6 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                     current_block += 1;
                     raw_entries.push((block, last_value_block));
                 }
-                eprintln!("meta entries: {:?}", raw_entries);
                 meta_nodes.push(RawTreeNode {
                     next: 0,
                     prev: 0,

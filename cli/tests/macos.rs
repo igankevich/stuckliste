@@ -4,7 +4,8 @@ use std::sync::Once;
 
 use arbitrary::Unstructured;
 use arbtest::arbtest;
-use cpio_test::DirectoryOfFiles;
+use random_dir::Dir;
+use random_dir::DirBuilder;
 use tempfile::TempDir;
 use test_bin::get_test_bin;
 
@@ -106,20 +107,19 @@ fn normalize_output(output: &[u8]) -> String {
     normalized_output
 }
 
-fn random_directory(u: &mut Unstructured<'_>) -> arbitrary::Result<DirectoryOfFiles> {
-    use cpio_test::FileType::*;
-    DirectoryOfFiles::new(
-        &[
+fn random_directory(u: &mut Unstructured<'_>) -> arbitrary::Result<Dir> {
+    use random_dir::FileType::*;
+    DirBuilder::new()
+        .file_types([
             Regular,
             Directory,
             BlockDevice,
             CharDevice,
             Symlink,
             HardLink,
-        ],
-        true,
-        u,
-    )
+        ])
+        .printable_names(true)
+        .create(u)
 }
 
 fn do_not_truncate_assertions() {

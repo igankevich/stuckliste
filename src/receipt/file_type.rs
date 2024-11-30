@@ -1,5 +1,9 @@
 use std::io::Error;
 use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Write;
+
+use crate::BigEndianIo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
@@ -36,15 +40,20 @@ impl FileType {
         }
     }
 
-    pub(crate) fn to_entry_type(self) -> u8 {
+    pub fn to_entry_type(self) -> EntryType {
         use FileType::*;
         match self {
-            Regular => 1,
-            Directory => 2,
-            Symlink => 3,
-            BlockDevice => 4,
-            CharDevice => 4,
+            Regular => EntryType::File,
+            Directory => EntryType::Directory,
+            Symlink => EntryType::Link,
+            BlockDevice => EntryType::Device,
+            CharDevice => EntryType::Device,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn to_mode_bits(self) -> u16 {
+        (self as u16) << 12
     }
 }
 
@@ -66,6 +75,44 @@ impl TryFrom<std::fs::FileType> for FileType {
             // named pipes and sockets are not supported
             Err(ErrorKind::InvalidData.into())
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[repr(u8)]
+pub enum EntryType {
+    File = 1,
+    Directory = 2,
+    Link = 3,
+    Device = 4,
+}
+
+impl TryFrom<u8> for EntryType {
+    type Error = Error;
+    fn try_from(other: u8) -> Result<Self, Self::Error> {
+        use EntryType::*;
+        const FILE: u8 = File as u8;
+        const DIRECTORY: u8 = Directory as u8;
+        const LINK: u8 = Link as u8;
+        const DEVICE: u8 = Device as u8;
+        match other {
+            FILE => Ok(File),
+            DIRECTORY => Ok(Directory),
+            LINK => Ok(Link),
+            DEVICE => Ok(Device),
+            _ => Err(ErrorKind::InvalidData.into()),
+        }
+    }
+}
+
+impl BigEndianIo for EntryType {
+    fn read_be<R: Read>(reader: R) -> Result<Self, Error> {
+        u8::read_be(reader)?.try_into()
+    }
+
+    fn write_be<W: Write>(&self, writer: W) -> Result<(), Error> {
+        (*self as u8).write_be(writer)
     }
 }
 

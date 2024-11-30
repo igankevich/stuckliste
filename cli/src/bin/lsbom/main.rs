@@ -11,6 +11,7 @@ use chrono::Local;
 use clap::Parser;
 use stuckliste::receipt::Executable;
 use stuckliste::receipt::FileType;
+use stuckliste::receipt::Link;
 use stuckliste::receipt::Metadata;
 use stuckliste::receipt::MetadataExtra;
 use stuckliste::receipt::Receipt;
@@ -159,7 +160,7 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                 }
                 print
             }
-            MetadataExtra::Link { checksum, name } if list.contains(List::Symlinks) => {
+            MetadataExtra::Link(Link { checksum, name }) if list.contains(List::Symlinks) => {
                 write_common(
                     &mut line,
                     path,

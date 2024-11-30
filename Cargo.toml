@@ -11,7 +11,7 @@ normalize-path = "0.2.1"
 walkdir = "2.5.0"
 
 [dev-dependencies]
-cpio-test = { path = "../cpio/cpio-test" }
+random-dir = { path = "../cpio/random-dir" }
 
 [workspace]
 members = [".", "cli"]
