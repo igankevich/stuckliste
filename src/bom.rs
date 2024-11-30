@@ -24,7 +24,7 @@ impl Bom {
     /// Bom length with padding.
     pub(crate) const LEN: usize = 512;
 
-    pub fn read_be(file: &[u8]) -> Result<Self, Error> {
+    pub fn read(file: &[u8]) -> Result<Self, Error> {
         if file.len() < Bom::LEN {
             return Err(ErrorKind::UnexpectedEof.into());
         }
@@ -63,7 +63,7 @@ impl Bom {
         })
     }
 
-    pub fn write_be<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
+    pub fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
         // append blocks at the current position
         let position = writer.stream_position()?;
         if position < Bom::LEN as u64 {
@@ -111,10 +111,10 @@ mod tests {
         arbtest(|u| {
             let expected: Bom = u.arbitrary()?;
             let mut writer = Cursor::new(Vec::new());
-            expected.write_be(&mut writer).unwrap();
+            expected.write(&mut writer).unwrap();
             let bytes = writer.into_inner();
             eprintln!("magic {:x?}", &bytes);
-            let actual = Bom::read_be(&bytes[..]).unwrap();
+            let actual = Bom::read(&bytes[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
         });

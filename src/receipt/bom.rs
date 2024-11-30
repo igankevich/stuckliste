@@ -36,7 +36,7 @@ impl Receipt {
         Ok(Self { tree })
     }
 
-    pub fn write_be<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
+    pub fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
         // skip the header
         writer.seek(SeekFrom::Start(Bom::LEN as u64))?;
         let mut blocks = Blocks::new();
@@ -79,7 +79,7 @@ impl Receipt {
             blocks,
             named_blocks,
         };
-        header.write_be(writer.by_ref())?;
+        header.write(writer.by_ref())?;
         let paths = self.tree.to_paths()?;
         for (path, metadata) in paths.iter() {
             eprintln!("write path {:?} metadata {:?}", path, metadata);
@@ -87,10 +87,10 @@ impl Receipt {
         Ok(())
     }
 
-    pub fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+    pub fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut file = Vec::new();
         reader.read_to_end(&mut file)?;
-        let header = Bom::read_be(&file[..])?;
+        let header = Bom::read(&file[..])?;
         let mut blocks = header.blocks;
         let mut named_blocks = header.named_blocks;
         eprintln!("{:#?}", named_blocks);
@@ -156,7 +156,7 @@ mod tests {
     fn bom_read() {
         {
             let filename = "exe-path-only.bom";
-            Receipt::read_be(File::open(filename).unwrap()).unwrap();
+            Receipt::read(File::open(filename).unwrap()).unwrap();
         }
         //Receipt::read(
         //    File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
@@ -176,14 +176,13 @@ mod tests {
 
     #[test]
     fn write_read() {
-        // TODO replace?
         arbtest(|u| {
             let expected: Receipt = u.arbitrary()?;
             let mut writer = Cursor::new(Vec::new());
-            expected.write_be(&mut writer).unwrap();
+            expected.write(&mut writer).unwrap();
             let bytes = writer.into_inner();
             eprintln!("magic {:x?}", &bytes[..8]);
-            let actual = Receipt::read_be(&bytes[..]).unwrap();
+            let actual = Receipt::read(&bytes[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
         });
