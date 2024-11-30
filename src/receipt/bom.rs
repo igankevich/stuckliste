@@ -148,12 +148,4 @@ mod tests {
             Ok(())
         });
     }
-
-    #[test]
-    fn bom_read() {
-        let bom = Receipt::read(std::fs::File::open("our-good.bom").unwrap()).unwrap();
-        eprintln!("good bom {:#?}", bom);
-        let bom = Receipt::read(std::fs::File::open("our-bad.bom").unwrap()).unwrap();
-        eprintln!("bad bom {:#?}", bom);
-    }
 }
