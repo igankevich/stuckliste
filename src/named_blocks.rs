@@ -57,12 +57,12 @@ impl NamedBlocks {
 }
 
 impl BigEndianIo for NamedBlocks {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let num_named_blocks = u32::read(reader.by_ref())? as usize;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let num_named_blocks = u32::read_be(reader.by_ref())? as usize;
         let mut blocks = Vec::with_capacity(num_named_blocks);
         for _ in 0..num_named_blocks {
-            let index = u32::read(reader.by_ref())?;
-            let len = u8::read(reader.by_ref())? as usize;
+            let index = u32::read_be(reader.by_ref())?;
+            let len = u8::read_be(reader.by_ref())? as usize;
             let mut name = vec![0_u8; len];
             reader.read_exact(&mut name[..])?;
             // remove the null character if any
@@ -76,16 +76,16 @@ impl BigEndianIo for NamedBlocks {
         Ok(Self { blocks })
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let num_named_blocks = self.blocks.len() as u32;
-        num_named_blocks.write(writer.by_ref())?;
+        num_named_blocks.write_be(writer.by_ref())?;
         for (name, index) in self.blocks.iter() {
             let name = name.to_bytes();
             let len = name.len();
             if len > u8::MAX as usize {
                 return Err(ErrorKind::InvalidData.into());
             }
-            index.write(writer.by_ref())?;
+            index.write_be(writer.by_ref())?;
             writer.write_all(&[len as u8])?;
             writer.write_all(name)?;
         }

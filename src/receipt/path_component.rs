@@ -45,14 +45,14 @@ impl BlockIo<Context> for PathComponentKey {
         context: &mut Context,
     ) -> Result<u32, Error> {
         let metadata_index =
-            blocks.append(writer.by_ref(), |writer| self.metadata.write(writer))?;
+            blocks.append(writer.by_ref(), |writer| self.metadata.write_be(writer))?;
         let file_size = self.metadata.size();
         if file_size > u32::MAX as u64 {
             context.file_size_64.insert(metadata_index, file_size);
         }
         let i = blocks.append(writer.by_ref(), |writer| {
-            self.id.write(writer.by_ref())?;
-            metadata_index.write(writer.by_ref())?;
+            self.id.write_be(writer.by_ref())?;
+            metadata_index.write_be(writer.by_ref())?;
             Ok(())
         })?;
         Ok(i)
@@ -65,13 +65,13 @@ impl BlockIo<Context> for PathComponentKey {
         context: &mut Context,
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
-        let id = u32::read(reader.by_ref())?;
+        let id = u32::read_be(reader.by_ref())?;
         eprintln!("id {}", id);
-        let i = u32::read(reader.by_ref())?;
+        let i = u32::read_be(reader.by_ref())?;
         let reader = blocks.slice(i, file)?;
         let block_len = reader.len();
         let mut reader = std::io::Cursor::new(reader);
-        let mut metadata = Metadata::read(reader.by_ref())?;
+        let mut metadata = Metadata::read_be(reader.by_ref())?;
         // TODO move to Metadata?? need to implement BlockIo for Metadata
         if let Some(size) = context.file_size_64.get(&i) {
             metadata.size = *size;
@@ -97,7 +97,7 @@ impl BlockIo<Context> for PathComponentValue {
         _context: &mut Context,
     ) -> Result<u32, Error> {
         let i = blocks.append(writer.by_ref(), |writer| {
-            self.parent.write(writer.by_ref())?;
+            self.parent.write_be(writer.by_ref())?;
             writer.write_all(self.name.to_bytes_with_nul())?;
             Ok(())
         })?;
@@ -112,7 +112,7 @@ impl BlockIo<Context> for PathComponentValue {
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
         eprintln!("block {}: {:?}", i, reader);
-        let parent = u32::read(reader.by_ref())?;
+        let parent = u32::read_be(reader.by_ref())?;
         let name = CStr::from_bytes_with_nul(reader).map_err(Error::other)?;
         //eprintln!(
         //    "name {:?} id {} parent {} kind {:?} metadata {:?}",

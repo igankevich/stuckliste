@@ -91,17 +91,17 @@ impl Blocks {
 }
 
 impl BigEndianIo for Blocks {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let num_blocks = u32::read(reader.by_ref())? as usize;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let num_blocks = u32::read_be(reader.by_ref())? as usize;
         let mut blocks = Vec::with_capacity(num_blocks);
         for _ in 0..num_blocks {
-            let block = Block::read(reader.by_ref())?;
+            let block = Block::read_be(reader.by_ref())?;
             blocks.push(block);
         }
-        let num_free_blocks = u32::read(reader.by_ref())? as usize;
+        let num_free_blocks = u32::read_be(reader.by_ref())? as usize;
         let mut null_blocks = Vec::with_capacity(num_free_blocks);
         for _ in 0..num_free_blocks {
-            let block = Block::read(reader.by_ref())?;
+            let block = Block::read_be(reader.by_ref())?;
             null_blocks.push(block);
         }
         #[cfg(test)]
@@ -118,16 +118,16 @@ impl BigEndianIo for Blocks {
         })
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let num_blocks = self.blocks.len() as u32;
-        num_blocks.write(writer.by_ref())?;
+        num_blocks.write_be(writer.by_ref())?;
         for block in self.blocks.iter() {
-            block.write(writer.by_ref())?;
+            block.write_be(writer.by_ref())?;
         }
         let num_free_blocks = self.null_blocks.len() as u32;
-        num_free_blocks.write(writer.by_ref())?;
+        num_free_blocks.write_be(writer.by_ref())?;
         for block in self.null_blocks.iter() {
-            block.write(writer.by_ref())?;
+            block.write_be(writer.by_ref())?;
         }
         Ok(())
     }
@@ -184,15 +184,15 @@ impl Block {
 }
 
 impl BigEndianIo for Block {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let offset = u32::read(reader.by_ref())?;
-        let len = u32::read(reader.by_ref())?;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let offset = u32::read_be(reader.by_ref())?;
+        let len = u32::read_be(reader.by_ref())?;
         Ok(Self { offset, len })
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        self.offset.write(writer.by_ref())?;
-        self.len.write(writer.by_ref())?;
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        self.offset.write_be(writer.by_ref())?;
+        self.len.write_be(writer.by_ref())?;
         Ok(())
     }
 }

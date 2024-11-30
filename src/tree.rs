@@ -84,7 +84,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 entries: raw_entries,
                 is_data: true,
             };
-            blocks.append(writer.by_ref(), |writer| data_node.write(writer))?
+            blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?
         } else {
             let num_data_nodes = num_entries.div_ceil(n);
             let num_meta_nodes = num_data_nodes.div_ceil(n);
@@ -136,7 +136,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                     } else {
                         current_block + 1
                     };
-                    let block = blocks.append(writer.by_ref(), |writer| data_node.write(writer))?;
+                    let block = blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?;
                     debug_assert!(block == current_block);
                     current_block += 1;
                     raw_entries.push((block, last_value_block));
@@ -164,7 +164,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 } else {
                     current_block + 1
                 };
-                let block = blocks.append(writer.by_ref(), |writer| meta_node.write(writer))?;
+                let block = blocks.append(writer.by_ref(), |writer| meta_node.write_be(writer))?;
                 debug_assert!(block == current_block);
                 current_block += 1;
             }
@@ -175,7 +175,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
             block_len: self.block_len as u32,
             num_entries: num_entries as u32,
         };
-        blocks.append(writer.by_ref(), |writer| tree.write(writer))
+        blocks.append(writer.by_ref(), |writer| tree.write_be(writer))
     }
 
     fn read_block(
@@ -184,7 +184,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
         blocks: &mut Blocks,
         context: &mut C,
     ) -> Result<Self, Error> {
-        let tree = RawTree::read(blocks.slice(i, file)?)?;
+        let tree = RawTree::read_be(blocks.slice(i, file)?)?;
         let mut entries = Vec::new();
         let mut visited = HashSet::new();
         let mut nodes = VecDeque::new();
@@ -194,7 +194,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 // loop
                 continue;
             }
-            let node = RawTreeNode::read(blocks.slice(node, file)?)?;
+            let node = RawTreeNode::read_be(blocks.slice(node, file)?)?;
             if node.is_data {
                 // data node
                 for (key, value) in node.entries.into_iter() {
@@ -236,23 +236,23 @@ impl RawTree {
 }
 
 impl BigEndianIo for RawTree {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut magic = [0_u8; 4];
         reader.read_exact(&mut magic[..])?;
         if TREE_MAGIC[..] != magic[..] {
             return Err(Error::other("invalid tree magic"));
         }
-        let version = u32::read(reader.by_ref())?;
+        let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
             return Err(Error::other(format!(
                 "unsupported tree version: {}",
                 version
             )));
         }
-        let root = u32::read(reader.by_ref())?;
-        let block_len = u32::read(reader.by_ref())?;
-        let num_entries = u32::read(reader.by_ref())?;
-        let _x = u8::read(reader.by_ref())?;
+        let root = u32::read_be(reader.by_ref())?;
+        let block_len = u32::read_be(reader.by_ref())?;
+        let num_entries = u32::read_be(reader.by_ref())?;
+        let _x = u8::read_be(reader.by_ref())?;
         Ok(Self {
             root,
             block_len,
@@ -260,13 +260,13 @@ impl BigEndianIo for RawTree {
         })
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         writer.write_all(&TREE_MAGIC[..])?;
-        Self::VERSION.write(writer.by_ref())?;
-        self.root.write(writer.by_ref())?;
-        self.block_len.write(writer.by_ref())?;
-        self.num_entries.write(writer.by_ref())?;
-        0_u8.write(writer.by_ref())?;
+        Self::VERSION.write_be(writer.by_ref())?;
+        self.root.write_be(writer.by_ref())?;
+        self.block_len.write_be(writer.by_ref())?;
+        self.num_entries.write_be(writer.by_ref())?;
+        0_u8.write_be(writer.by_ref())?;
         Ok(())
     }
 }
@@ -280,15 +280,15 @@ struct RawTreeNode {
 }
 
 impl BigEndianIo for RawTreeNode {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let is_data = u16::read(reader.by_ref())? != 0;
-        let num_entries = u16::read(reader.by_ref())?;
-        let next = u32::read(reader.by_ref())?;
-        let prev = u32::read(reader.by_ref())?;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let is_data = u16::read_be(reader.by_ref())? != 0;
+        let num_entries = u16::read_be(reader.by_ref())?;
+        let next = u32::read_be(reader.by_ref())?;
+        let prev = u32::read_be(reader.by_ref())?;
         let mut entries = Vec::with_capacity(num_entries as usize);
         for _ in 0..num_entries {
-            let key = u32::read(reader.by_ref())?;
-            let value = u32::read(reader.by_ref())?;
+            let key = u32::read_be(reader.by_ref())?;
+            let value = u32::read_be(reader.by_ref())?;
             entries.push((key, value));
         }
         Ok(Self {
@@ -299,20 +299,20 @@ impl BigEndianIo for RawTreeNode {
         })
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let is_data: u16 = if self.is_data { 1 } else { 0 };
         let num_entries: u16 = self
             .entries
             .len()
             .try_into()
             .map_err(|_| Error::other("too many entries"))?;
-        is_data.write(writer.by_ref())?;
-        num_entries.write(writer.by_ref())?;
-        self.next.write(writer.by_ref())?;
-        self.prev.write(writer.by_ref())?;
+        is_data.write_be(writer.by_ref())?;
+        num_entries.write_be(writer.by_ref())?;
+        self.next.write_be(writer.by_ref())?;
+        self.prev.write_be(writer.by_ref())?;
         for (key, value) in self.entries.iter() {
-            key.write(writer.by_ref())?;
-            value.write(writer.by_ref())?;
+            key.write_be(writer.by_ref())?;
+            value.write_be(writer.by_ref())?;
         }
         Ok(())
     }

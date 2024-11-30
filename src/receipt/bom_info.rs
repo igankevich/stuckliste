@@ -48,31 +48,31 @@ impl BomInfo {
 }
 
 impl BigEndianIo for BomInfo {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let version = u32::read(reader.by_ref())?;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
             return Err(Error::other(format!(
                 "unsupported BOMInfo version: {}",
                 version
             )));
         }
-        let num_paths = u32::read(reader.by_ref())?;
-        let num_entries = u32::read(reader.by_ref())?;
+        let num_paths = u32::read_be(reader.by_ref())?;
+        let num_entries = u32::read_be(reader.by_ref())?;
         //eprintln!("num paths {}", num_paths);
         //eprintln!("num entries {}", num_entries);
         let mut entries = Vec::new();
         for _ in 0..num_entries {
-            entries.push(BomInfoEntry::read(reader.by_ref())?);
+            entries.push(BomInfoEntry::read_be(reader.by_ref())?);
         }
         Ok(Self { num_paths, entries })
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        Self::VERSION.write(writer.by_ref())?;
-        self.num_paths.write(writer.by_ref())?;
-        (self.entries.len() as u32).write(writer.by_ref())?;
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        Self::VERSION.write_be(writer.by_ref())?;
+        self.num_paths.write_be(writer.by_ref())?;
+        (self.entries.len() as u32).write_be(writer.by_ref())?;
         for entry in self.entries.iter() {
-            entry.write(writer.by_ref())?;
+            entry.write_be(writer.by_ref())?;
         }
         Ok(())
     }
@@ -86,11 +86,11 @@ pub(crate) struct BomInfoEntry {
 }
 
 impl BigEndianIo for BomInfoEntry {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let cpu_type = u32::read(reader.by_ref())?;
-        let _x1 = u32::read(reader.by_ref())?;
-        let file_size = u32::read(reader.by_ref())?;
-        let _x2 = u32::read(reader.by_ref())?;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let cpu_type = u32::read_be(reader.by_ref())?;
+        let _x1 = u32::read_be(reader.by_ref())?;
+        let file_size = u32::read_be(reader.by_ref())?;
+        let _x2 = u32::read_be(reader.by_ref())?;
         let entry = BomInfoEntry {
             cpu_type,
             file_size,
@@ -99,11 +99,11 @@ impl BigEndianIo for BomInfoEntry {
         Ok(entry)
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        self.cpu_type.write(writer.by_ref())?;
-        DEFAULT_X1.write(writer.by_ref())?;
-        self.file_size.write(writer.by_ref())?;
-        DEFAULT_X2.write(writer.by_ref())?;
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        self.cpu_type.write_be(writer.by_ref())?;
+        DEFAULT_X1.write_be(writer.by_ref())?;
+        self.file_size.write_be(writer.by_ref())?;
+        DEFAULT_X2.write_be(writer.by_ref())?;
         Ok(())
     }
 }

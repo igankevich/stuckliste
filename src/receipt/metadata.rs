@@ -108,12 +108,12 @@ impl Metadata {
 }
 
 impl BigEndianIo for Metadata {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let kind: FileType = u8::read(reader.by_ref())?.try_into()?;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let kind: FileType = u8::read_be(reader.by_ref())?.try_into()?;
         eprintln!("kind {:?}", kind);
-        let _x0 = u8::read(reader.by_ref())?;
+        let _x0 = u8::read_be(reader.by_ref())?;
         debug_assert!(_x0 == 1, "x0 {:?}", _x0);
-        let flags = u16::read(reader.by_ref())?;
+        let flags = u16::read_be(reader.by_ref())?;
         if is_path_only(flags) {
             // This BOM stores paths only.
             let metadata = Self {
@@ -127,23 +127,23 @@ impl BigEndianIo for Metadata {
             return Ok(metadata);
         }
         let binary_type = get_binary_type(flags);
-        let mode = u16::read(reader.by_ref())?;
+        let mode = u16::read_be(reader.by_ref())?;
         let mode = mode & MODE_MASK;
-        let uid = u32::read(reader.by_ref())?;
-        let gid = u32::read(reader.by_ref())?;
-        let mtime = u32::read(reader.by_ref())?;
-        let size = u32::read(reader.by_ref())?;
-        let _x1 = u8::read(reader.by_ref())?;
+        let uid = u32::read_be(reader.by_ref())?;
+        let gid = u32::read_be(reader.by_ref())?;
+        let mtime = u32::read_be(reader.by_ref())?;
+        let size = u32::read_be(reader.by_ref())?;
+        let _x1 = u8::read_be(reader.by_ref())?;
         debug_assert!(_x1 == 1, "x1 {:?}", _x1);
         let extra = match kind {
             FileType::File if binary_type != BinaryType::Unknown => {
-                let checksum = u32::read(reader.by_ref())?;
-                let flag = u8::read(reader.by_ref())?;
+                let checksum = u32::read_be(reader.by_ref())?;
+                let flag = u8::read_be(reader.by_ref())?;
                 debug_assert!(flag == 1, "flag = {flag}");
-                let num_arch_again = u32::read(reader.by_ref())?;
+                let num_arch_again = u32::read_be(reader.by_ref())?;
                 let mut arches = Vec::with_capacity(num_arch_again as usize);
                 for _ in 0..num_arch_again {
-                    arches.push(ExeArch::read(reader.by_ref())?);
+                    arches.push(ExeArch::read_be(reader.by_ref())?);
                 }
                 MetadataExtra::Executable(Executable { checksum, arches })
             }
@@ -153,7 +153,7 @@ impl BigEndianIo for Metadata {
                     "unexpected binary type {:?}",
                     binary_type
                 );
-                let checksum = u32::read(reader.by_ref())?;
+                let checksum = u32::read_be(reader.by_ref())?;
                 MetadataExtra::File { checksum }
             }
             FileType::Directory => {
@@ -170,8 +170,8 @@ impl BigEndianIo for Metadata {
                     "unexpected binary type {:?}",
                     binary_type
                 );
-                let checksum = u32::read(reader.by_ref())?;
-                let name_len = u32::read(reader.by_ref())?;
+                let checksum = u32::read_be(reader.by_ref())?;
+                let name_len = u32::read_be(reader.by_ref())?;
                 debug_assert!(
                     name_len == 0 || kind == FileType::Link,
                     "kind = {:?}, name_len = {}",
@@ -189,7 +189,7 @@ impl BigEndianIo for Metadata {
                     "unexpected binary type {:?}",
                     binary_type
                 );
-                let dev = u32::read(reader.by_ref())?;
+                let dev = u32::read_be(reader.by_ref())?;
                 MetadataExtra::Device(Device { dev })
             }
         };
@@ -202,47 +202,47 @@ impl BigEndianIo for Metadata {
             extra,
         };
         // We ignore 8 zero bytes here.
-        let trailer = u64::read(reader.by_ref())?;
+        let trailer = u64::read_be(reader.by_ref())?;
         debug_assert!(trailer == 0, "trailer = {trailer}, metadata = {metadata:?}");
         Ok(metadata)
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        (self.file_type() as u8).write(writer.by_ref())?;
-        1_u8.write(writer.by_ref())?;
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        (self.file_type() as u8).write_be(writer.by_ref())?;
+        1_u8.write_be(writer.by_ref())?;
         let flags = self.flags();
-        flags.write(writer.by_ref())?;
+        flags.write_be(writer.by_ref())?;
         if is_path_only(flags) {
             return Ok(());
         }
-        (self.mode & MODE_MASK).write(writer.by_ref())?;
-        self.uid.write(writer.by_ref())?;
-        self.gid.write(writer.by_ref())?;
-        self.mtime.write(writer.by_ref())?;
-        (self.size as u32).write(writer.by_ref())?; // truncate the size
-        1_u8.write(writer.by_ref())?;
+        (self.mode & MODE_MASK).write_be(writer.by_ref())?;
+        self.uid.write_be(writer.by_ref())?;
+        self.gid.write_be(writer.by_ref())?;
+        self.mtime.write_be(writer.by_ref())?;
+        (self.size as u32).write_be(writer.by_ref())?; // truncate the size
+        1_u8.write_be(writer.by_ref())?;
         match &self.extra {
             MetadataExtra::File { checksum } => {
-                checksum.write(writer.by_ref())?;
+                checksum.write_be(writer.by_ref())?;
             }
             MetadataExtra::Executable(Executable { checksum, arches }) => {
-                checksum.write(writer.by_ref())?;
-                1_u8.write(writer.by_ref())?;
+                checksum.write_be(writer.by_ref())?;
+                1_u8.write_be(writer.by_ref())?;
                 let num_arches = arches.len() as u32;
-                num_arches.write(writer.by_ref())?;
+                num_arches.write_be(writer.by_ref())?;
                 for arch in arches.iter() {
-                    arch.write(writer.by_ref())?;
+                    arch.write_be(writer.by_ref())?;
                 }
             }
             MetadataExtra::Directory => {}
             MetadataExtra::Link { checksum, name } => {
-                checksum.write(writer.by_ref())?;
+                checksum.write_be(writer.by_ref())?;
                 let name_bytes = name.as_bytes_with_nul();
-                (name_bytes.len() as u32).write(writer.by_ref())?;
+                (name_bytes.len() as u32).write_be(writer.by_ref())?;
                 writer.write_all(name_bytes)?;
             }
             MetadataExtra::Device(Device { dev }) => {
-                dev.write(writer.by_ref())?;
+                dev.write_be(writer.by_ref())?;
             }
             MetadataExtra::PathOnly { .. } => {}
         }
@@ -320,11 +320,11 @@ pub struct ExeArch {
 }
 
 impl BigEndianIo for ExeArch {
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let cpu_type = u32::read(reader.by_ref())?;
-        let cpu_sub_type = u32::read(reader.by_ref())?;
-        let size = u32::read(reader.by_ref())?;
-        let checksum = u32::read(reader.by_ref())?;
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let cpu_type = u32::read_be(reader.by_ref())?;
+        let cpu_sub_type = u32::read_be(reader.by_ref())?;
+        let size = u32::read_be(reader.by_ref())?;
+        let checksum = u32::read_be(reader.by_ref())?;
         Ok(Self {
             cpu_type,
             cpu_sub_type,
@@ -333,11 +333,11 @@ impl BigEndianIo for ExeArch {
         })
     }
 
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        self.cpu_type.write(writer.by_ref())?;
-        self.cpu_sub_type.write(writer.by_ref())?;
-        self.size.write(writer.by_ref())?;
-        self.checksum.write(writer.by_ref())?;
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        self.cpu_type.write_be(writer.by_ref())?;
+        self.cpu_sub_type.write_be(writer.by_ref())?;
+        self.size.write_be(writer.by_ref())?;
+        self.checksum.write_be(writer.by_ref())?;
         Ok(())
     }
 }

@@ -35,7 +35,7 @@ impl<T: BlockIo<Context>> BlockIo<Context> for Ptr<T> {
         context: &mut Context,
     ) -> Result<u32, Error> {
         let i = self.0.write_block(writer.by_ref(), blocks, context)?;
-        blocks.append(writer, |writer| i.write(writer))
+        blocks.append(writer, |writer| i.write_be(writer))
     }
 
     fn read_block(
@@ -45,7 +45,7 @@ impl<T: BlockIo<Context>> BlockIo<Context> for Ptr<T> {
         context: &mut Context,
     ) -> Result<Self, Error> {
         let reader = blocks.slice(i, file)?;
-        let i = u32::read(reader)?;
+        let i = u32::read_be(reader)?;
         let value = T::read_block(i, file, blocks, context)?;
         Ok(value.into())
     }

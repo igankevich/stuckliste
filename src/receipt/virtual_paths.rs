@@ -36,19 +36,19 @@ impl BlockIo<Context> for VirtualPathTree {
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
         eprintln!("vindex block {:?}", reader);
-        let version = u32::read(reader.by_ref())?;
+        let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
             return Err(Error::other(format!(
                 "unsupported VirtualPathTree version: {}",
                 version
             )));
         }
-        let i = u32::read(reader.by_ref())?;
-        let _x0 = u32::read(reader.by_ref())?;
+        let i = u32::read_be(reader.by_ref())?;
+        let _x0 = u32::read_be(reader.by_ref())?;
         eprintln!("vindex x0 {}", _x0);
         // TODO
         //debug_assert!(_x0 == 0, "x0 = {}", _x0);
-        let _x1 = u8::read(reader.by_ref())?;
+        let _x1 = u8::read_be(reader.by_ref())?;
         eprintln!("vindex x1 {}", _x1);
         // TODO
         //debug_assert!(_x1 == DEFAULT_X1, "x1 = {_x1}");
@@ -65,10 +65,10 @@ impl BlockIo<Context> for VirtualPathTree {
     ) -> Result<u32, Error> {
         let tree_index = self.tree.write_block(writer.by_ref(), blocks, context)?;
         let i = blocks.append(writer.by_ref(), |writer| {
-            Self::VERSION.write(writer.by_ref())?;
-            tree_index.write(writer.by_ref())?;
-            0_u32.write(writer.by_ref())?;
-            DEFAULT_X1.write(writer.by_ref())?;
+            Self::VERSION.write_be(writer.by_ref())?;
+            tree_index.write_be(writer.by_ref())?;
+            0_u32.write_be(writer.by_ref())?;
+            DEFAULT_X1.write_be(writer.by_ref())?;
             Ok(())
         })?;
         Ok(i)

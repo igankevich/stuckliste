@@ -27,14 +27,14 @@ impl<T: BigEndianIo, C> BlockIo<C> for T {
         blocks: &mut Blocks,
         _context: &mut C,
     ) -> Result<u32, Error> {
-        blocks.append(writer, |writer| BigEndianIo::write(self, writer))
+        blocks.append(writer, |writer| BigEndianIo::write_be(self, writer))
     }
 
     fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, _context: &mut C) -> Result<Self, Error>
     where
         Self: Sized,
     {
-        BigEndianIo::read(blocks.slice(i, file)?)
+        BigEndianIo::read_be(blocks.slice(i, file)?)
     }
 }
 
@@ -71,7 +71,7 @@ impl<C, T: BlockIo<C>> BlockIo<C> for Option<T> {
             Some(value) => value.write_block(writer.by_ref(), blocks, context)?,
             None => blocks.append_null(writer.by_ref())?,
         };
-        blocks.append(writer, |writer| i.write(writer))
+        blocks.append(writer, |writer| i.write_be(writer))
     }
 
     fn read_block(
@@ -81,7 +81,7 @@ impl<C, T: BlockIo<C>> BlockIo<C> for Option<T> {
         context: &mut C,
     ) -> Result<Self, Error> {
         let reader = blocks.slice(i, file)?;
-        let i = u32::read(reader)?;
+        let i = u32::read_be(reader)?;
         if blocks.slice(i, file)?.is_empty() {
             Ok(None)
         } else {

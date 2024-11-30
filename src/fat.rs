@@ -8,7 +8,7 @@ pub struct FatBinary {
 }
 
 impl FatBinary {
-    pub fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+    pub fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut header = [0_u8; HEADER_LEN];
         reader.read_exact(&mut header[..])?;
         let magic = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
@@ -20,7 +20,7 @@ impl FatBinary {
         let num_arches = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
         let mut arches = Vec::with_capacity(num_arches as usize);
         for _ in 0..num_arches {
-            arches.push(FatArch::read(reader.by_ref(), is_64_bit)?);
+            arches.push(FatArch::read_be(reader.by_ref(), is_64_bit)?);
         }
         Ok(Self { arches })
     }
@@ -35,7 +35,7 @@ pub struct FatArch {
 }
 
 impl FatArch {
-    pub fn read<R: Read>(mut reader: R, is_64_bit: bool) -> Result<Self, Error> {
+    pub fn read_be<R: Read>(mut reader: R, is_64_bit: bool) -> Result<Self, Error> {
         let cpu_type = u32_read(reader.by_ref())?;
         let cpu_sub_type = u32_read(reader.by_ref())?;
         let (offset, size) = if is_64_bit {
