@@ -11,6 +11,7 @@ use chrono::Local;
 use clap::Parser;
 use stuckliste::receipt::Executable;
 use stuckliste::receipt::FileType;
+use stuckliste::receipt::Link;
 use stuckliste::receipt::Metadata;
 use stuckliste::receipt::MetadataExtra;
 use stuckliste::receipt::Receipt;
@@ -111,6 +112,7 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
     use std::fmt::Write;
     let file = File::open(path)?;
     let bom = Receipt::read(file)?;
+    eprintln!("bom {:#?}", bom);
     let paths = bom.paths()?;
     let list = args.list();
     let mut line = String::with_capacity(4096);
@@ -159,7 +161,7 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                 }
                 print
             }
-            MetadataExtra::Link { checksum, name } if list.contains(List::Symlinks) => {
+            MetadataExtra::Link(Link { checksum, name }) if list.contains(List::Symlinks) => {
                 write_common(
                     &mut line,
                     path,

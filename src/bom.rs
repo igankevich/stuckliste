@@ -29,7 +29,6 @@ impl Bom {
             return Err(ErrorKind::UnexpectedEof.into());
         }
         if file[..BOM_MAGIC.len()] != BOM_MAGIC[..] {
-            eprintln!("magic {:x?}", &file[..BOM_MAGIC.len()]);
             return Err(Error::other("not a bom store"));
         }
         let version = u32_read(&file[8..12]);

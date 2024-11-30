@@ -77,26 +77,29 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 let value = value.write_block(writer.by_ref(), blocks, context)?;
                 raw_entries.push((key, value));
             }
-            eprintln!("data entries: {:?}", raw_entries);
+            //let last_value_block = raw_entries.last().map(|x| x.1).unwrap_or(0);
             let data_node = RawTreeNode {
                 next: 0,
                 prev: 0,
                 entries: raw_entries,
                 is_data: true,
             };
+
             blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?
+            //let raw_entries = vec![(block, last_value_block)];
+            //let meta_node = RawTreeNode {
+            //    next: 0,
+            //    prev: 0,
+            //    entries: raw_entries,
+            //    is_data: false,
+            //};
+            //blocks.append(writer.by_ref(), |writer| meta_node.write_be(writer))?
         } else {
             let num_data_nodes = num_entries.div_ceil(n);
             let num_meta_nodes = num_data_nodes.div_ceil(n);
             let max_data_nodes_per_meta_node = num_data_nodes.div_ceil(num_meta_nodes);
             let mut iter = self.entries.iter();
             let mut meta_nodes = Vec::with_capacity(num_meta_nodes);
-            eprintln!("num meta nodes {}", num_meta_nodes);
-            eprintln!("num data nodes {}", num_data_nodes);
-            eprintln!(
-                "max data nodes per meta node {}",
-                max_data_nodes_per_meta_node
-            );
             for _ in 0..num_meta_nodes {
                 let mut data_nodes = Vec::with_capacity(max_data_nodes_per_meta_node);
                 for _ in 0..max_data_nodes_per_meta_node {
@@ -110,6 +113,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                         let value = value.write_block(writer.by_ref(), blocks, context)?;
                         raw_entries.push((key, value));
                     }
+                    #[allow(clippy::expect_used)]
                     let last_value_block =
                         raw_entries.last().expect("We have at least one entry").1;
                     let data_node = RawTreeNode {
@@ -136,12 +140,12 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                     } else {
                         current_block + 1
                     };
-                    let block = blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?;
+                    let block =
+                        blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?;
                     debug_assert!(block == current_block);
                     current_block += 1;
                     raw_entries.push((block, last_value_block));
                 }
-                eprintln!("meta entries: {:?}", raw_entries);
                 meta_nodes.push(RawTreeNode {
                     next: 0,
                     prev: 0,
@@ -195,6 +199,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 continue;
             }
             let node = RawTreeNode::read_be(blocks.slice(node, file)?)?;
+            eprintln!("tree node {:?}", node);
             if node.is_data {
                 // data node
                 for (key, value) in node.entries.into_iter() {
@@ -225,6 +230,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
     }
 }
 
+#[derive(Debug)]
 struct RawTree {
     root: u32,
     block_len: u32,
@@ -271,6 +277,7 @@ impl BigEndianIo for RawTree {
     }
 }
 
+#[derive(Debug)]
 struct RawTreeNode {
     next: u32,
     prev: u32,

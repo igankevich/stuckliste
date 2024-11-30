@@ -1,0 +1,45 @@
+---
+name: CI
+on: [push]
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/igankevich/stuckliste-ci:latest
+      options: --cap-add SYS_PTRACE
+    env:
+      TZ: Europe/Berlin
+      RUST_BACKTRACE: 1
+      CIJAIL_ENDPOINTS: |
+        https://github.com/lyz-code/yamlfix/
+        https://pypi.org/simple/
+        https://files.pythonhosted.org/packages/
+        https://static.crates.io/crates/
+        https://index.crates.io/
+        https://github.com/rustsec/advisory-db
+        https://static.rust-lang.org/dist/
+        https://github.com/igankevich/kpea/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - name: Lint
+        run: cijail ./ci/lint.sh
+      - name: Test
+        run: cijail ./ci/test.sh
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CIJAIL_ENDPOINTS: |
+            ${{ env.CIJAIL_ENDPOINTS }}
+            https://crates.io/api/v1/crates/new
+        run: cijail ./ci/publish.sh
+  macos:
+    runs-on: macos-latest
+    env:
+      TZ: Europe/Berlin
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo test --workspace --all-targets

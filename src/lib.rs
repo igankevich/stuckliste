@@ -1,7 +1,6 @@
 mod block_io;
 mod blocks;
 mod bom;
-mod fat;
 mod io;
 mod named_blocks;
 pub mod receipt;

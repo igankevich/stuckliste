@@ -10,7 +10,7 @@ use stuckliste::receipt::Receipt;
 struct Args {
     /// Create simplified BOM that contains only paths.
     #[arg(short = 's')]
-    simple: bool,
+    paths_only: bool,
     /// File list.
     #[arg(short = 'i', value_name = "file")]
     file_list: Option<PathBuf>,
@@ -41,7 +41,7 @@ fn do_main() -> Result<ExitCode, Error> {
         return Err(Error::other("output file is not specified"));
     };
     if let Some(directory) = args.directory {
-        let bom = Receipt::from_directory(&directory)?;
+        let bom = Receipt::from_directory(&directory, args.paths_only)?;
         let file = File::create(&output_path)?;
         bom.write(file)?;
         Ok(ExitCode::SUCCESS)

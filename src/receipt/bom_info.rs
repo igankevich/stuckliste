@@ -58,8 +58,6 @@ impl BigEndianIo for BomInfo {
         }
         let num_paths = u32::read_be(reader.by_ref())?;
         let num_entries = u32::read_be(reader.by_ref())?;
-        //eprintln!("num paths {}", num_paths);
-        //eprintln!("num entries {}", num_entries);
         let mut entries = Vec::new();
         for _ in 0..num_entries {
             entries.push(BomInfoEntry::read_be(reader.by_ref())?);

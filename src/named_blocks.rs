@@ -72,7 +72,6 @@ impl BigEndianIo for NamedBlocks {
             let name = CString::new(name).map_err(|_| ErrorKind::InvalidData)?;
             blocks.push((name, index));
         }
-        //eprintln!("blocks {:?}", blocks);
         Ok(Self { blocks })
     }
 

@@ -156,18 +156,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
-name = "cpio-test"
-version = "0.2.0"
-dependencies = [
- "arbitrary",
- "arbtest",
- "libc",
- "normalize-path",
- "tempfile",
- "walkdir",
-]
-
-[[package]]
 name = "derive_arbitrary"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -309,6 +297,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "random-dir"
+version = "0.2.3"
+source = "git+https://github.com/igankevich/kpea?tag=0.2.3#3cc474aaece6f0d124d1125426256263c4d60503"
+dependencies = [
+ "arbitrary",
+ "libc",
+ "normalize-path",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -384,13 +384,13 @@ dependencies = [
 
 [[package]]
 name = "stuckliste"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arbitrary",
  "arbtest",
- "cpio-test",
  "libc",
  "normalize-path",
+ "random-dir",
  "walkdir",
 ]
 
@@ -403,7 +403,7 @@ dependencies = [
  "bitflags",
  "chrono",
  "clap",
- "cpio-test",
+ "random-dir",
  "similar-asserts",
  "stuckliste",
  "tempfile",
