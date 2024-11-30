@@ -2,11 +2,8 @@
 name: CI
 on: [push]
 jobs:
-  ci:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  ubuntu:
+    runs-on: ubuntu-latest
     container:
       image: ghcr.io/igankevich/stuckliste-ci:latest
       options: --cap-add SYS_PTRACE
