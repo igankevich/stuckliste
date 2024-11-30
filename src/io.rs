@@ -69,8 +69,3 @@ impl BigEndianIo for () {
         Ok(())
     }
 }
-
-// TODO remove
-pub(crate) fn write_be<W: Write, T: BigEndianIo>(writer: W, value: T) -> Result<(), Error> {
-    value.write(writer)
-}

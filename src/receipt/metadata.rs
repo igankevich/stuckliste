@@ -3,7 +3,6 @@ use std::io::Error;
 use std::io::Read;
 use std::io::Write;
 
-use crate::io::*;
 use crate::receipt::BomInfo;
 use crate::BigEndianIo;
 use crate::FileType;
@@ -217,17 +216,17 @@ impl BigEndianIo for Metadata {
             return Ok(());
         }
         (self.mode & MODE_MASK).write(writer.by_ref())?;
-        write_be(writer.by_ref(), self.uid)?;
-        write_be(writer.by_ref(), self.gid)?;
-        write_be(writer.by_ref(), self.mtime)?;
-        write_be(writer.by_ref(), self.size as u32)?; // truncate the size
+        self.uid.write(writer.by_ref())?;
+        self.gid.write(writer.by_ref())?;
+        self.mtime.write(writer.by_ref())?;
+        (self.size as u32).write(writer.by_ref())?; // truncate the size
         1_u8.write(writer.by_ref())?;
         match &self.extra {
             MetadataExtra::File { checksum } => {
-                write_be(writer.by_ref(), *checksum)?;
+                checksum.write(writer.by_ref())?;
             }
             MetadataExtra::Executable(Executable { checksum, arches }) => {
-                write_be(writer.by_ref(), *checksum)?;
+                checksum.write(writer.by_ref())?;
                 1_u8.write(writer.by_ref())?;
                 let num_arches = arches.len() as u32;
                 num_arches.write(writer.by_ref())?;
@@ -237,13 +236,13 @@ impl BigEndianIo for Metadata {
             }
             MetadataExtra::Directory => {}
             MetadataExtra::Link { checksum, name } => {
-                write_be(writer.by_ref(), *checksum)?;
+                checksum.write(writer.by_ref())?;
                 let name_bytes = name.as_bytes_with_nul();
-                write_be(writer.by_ref(), name_bytes.len() as u32)?;
+                (name_bytes.len() as u32).write(writer.by_ref())?;
                 writer.write_all(name_bytes)?;
             }
             MetadataExtra::Device(Device { dev }) => {
-                write_be(writer.by_ref(), *dev)?;
+                dev.write(writer.by_ref())?;
             }
             MetadataExtra::PathOnly { .. } => {}
         }
@@ -335,10 +334,10 @@ impl BigEndianIo for ExeArch {
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        write_be(writer.by_ref(), self.cpu_type)?;
-        write_be(writer.by_ref(), self.cpu_sub_type)?;
-        write_be(writer.by_ref(), self.size)?;
-        write_be(writer.by_ref(), self.checksum)?;
+        self.cpu_type.write(writer.by_ref())?;
+        self.cpu_sub_type.write(writer.by_ref())?;
+        self.size.write(writer.by_ref())?;
+        self.checksum.write(writer.by_ref())?;
         Ok(())
     }
 }

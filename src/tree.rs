@@ -262,10 +262,10 @@ impl BigEndianIo for RawTree {
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         writer.write_all(&TREE_MAGIC[..])?;
-        write_be(writer.by_ref(), Self::VERSION)?;
-        write_be(writer.by_ref(), self.root)?;
-        write_be(writer.by_ref(), self.block_len)?;
-        write_be(writer.by_ref(), self.num_entries)?;
+        Self::VERSION.write(writer.by_ref())?;
+        self.root.write(writer.by_ref())?;
+        self.block_len.write(writer.by_ref())?;
+        self.num_entries.write(writer.by_ref())?;
         0_u8.write(writer.by_ref())?;
         Ok(())
     }
