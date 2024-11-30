@@ -21,4 +21,10 @@ impl Context {
     }
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type VecTree<K, V> = crate::VecTree<K, V, Context>;

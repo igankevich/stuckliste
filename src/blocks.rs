@@ -133,6 +133,12 @@ impl BigEndianIo for Blocks {
     }
 }
 
+impl Default for Blocks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A block of data.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]

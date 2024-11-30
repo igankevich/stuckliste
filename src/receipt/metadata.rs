@@ -174,7 +174,7 @@ impl BigEndianIo for Metadata {
                 let checksum = u32::read(reader.by_ref())?;
                 let name_len = u32::read(reader.by_ref())?;
                 debug_assert!(
-                    name_len == 0 && kind != FileType::Link || kind == FileType::Link,
+                    name_len == 0 || kind == FileType::Link,
                     "kind = {:?}, name_len = {}",
                     kind,
                     name_len
@@ -447,6 +447,7 @@ mod tests {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let extra: MetadataExtra = u.arbitrary()?;
             if matches!(extra, MetadataExtra::PathOnly { .. }) {
+                // TODO merge metadata and metadata extra
                 Ok(Self(Metadata {
                     mode: 0,
                     uid: 0,

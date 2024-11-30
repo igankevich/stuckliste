@@ -154,18 +154,8 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        for filename in [
-            //"block.bom",
-            //"char.bom",
-            //"dir.bom",
-            //"file.bom",
-            //"hardlink.bom",
-            //"symlink.bom",
-            //"exe.bom",
-            //"size64.bom",
-            //"file-path-only.bom",
-            "exe-path-only.bom",
-        ] {
+        {
+            let filename = "exe-path-only.bom";
             Receipt::read(File::open(filename).unwrap()).unwrap();
         }
         //Receipt::read(

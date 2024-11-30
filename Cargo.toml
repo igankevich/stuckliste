@@ -12,3 +12,9 @@ walkdir = "2.5.0"
 
 [dev-dependencies]
 cpio-test = { path = "../cpio/cpio-test" }
+
+[workspace]
+members = [".", "cli"]
+
+[workspace.dependencies]
+stuckliste = { path = "." }

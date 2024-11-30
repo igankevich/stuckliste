@@ -67,7 +67,7 @@ impl BlockIo<Context> for HardLinks {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<Self, Error> {
-        let tree = HardLinkTree::read_block(i, &file, blocks, context)?;
+        let tree = HardLinkTree::read_block(i, file, blocks, context)?;
         let mut hard_links: HashMap<u32, Vec<CString>> = HashMap::new();
         for (hard_links_tree, metadata_index) in tree.into_inner().into_iter() {
             let names = hard_links.entry(metadata_index).or_default();

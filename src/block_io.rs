@@ -34,7 +34,7 @@ impl<T: BigEndianIo, C> BlockIo<C> for T {
     where
         Self: Sized,
     {
-        BigEndianIo::read(blocks.slice(i, &file)?)
+        BigEndianIo::read(blocks.slice(i, file)?)
     }
 }
 
@@ -54,8 +54,8 @@ impl<C> BlockIo<C> for CString {
         blocks: &mut Blocks,
         _context: &mut C,
     ) -> Result<Self, Error> {
-        let block = blocks.slice(i, &file)?;
-        let c_str = CStr::from_bytes_with_nul(&block[..]).map_err(Error::other)?;
+        let block = blocks.slice(i, file)?;
+        let c_str = CStr::from_bytes_with_nul(block).map_err(Error::other)?;
         Ok(c_str.into())
     }
 }

@@ -48,8 +48,8 @@ impl Bom {
             offset: u32_read(&file[24..28]),
             len: u32_read(&file[28..32]),
         };
-        let blocks = Blocks::read(blocks.slice(&file))?;
-        let named_blocks = NamedBlocks::read(named_blocks.slice(&file))?;
+        let blocks = Blocks::read(blocks.slice(file))?;
+        let named_blocks = NamedBlocks::read(named_blocks.slice(file))?;
         // TODO ???
         debug_assert!(
             num_non_null_blocks as usize >= blocks.num_non_null_blocks(),

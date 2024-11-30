@@ -93,6 +93,12 @@ impl BigEndianIo for NamedBlocks {
     }
 }
 
+impl Default for NamedBlocks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

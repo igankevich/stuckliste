@@ -68,7 +68,7 @@ impl BlockIo<Context> for PathComponentKey {
         let id = u32::read(reader.by_ref())?;
         eprintln!("id {}", id);
         let i = u32::read(reader.by_ref())?;
-        let reader = blocks.slice(i, &file)?;
+        let reader = blocks.slice(i, file)?;
         let block_len = reader.len();
         let mut reader = std::io::Cursor::new(reader);
         let mut metadata = Metadata::read(reader.by_ref())?;
@@ -110,7 +110,7 @@ impl BlockIo<Context> for PathComponentValue {
         blocks: &mut Blocks,
         _context: &mut Context,
     ) -> Result<Self, Error> {
-        let mut reader = blocks.slice(i, &file)?;
+        let mut reader = blocks.slice(i, file)?;
         eprintln!("block {}: {:?}", i, reader);
         let parent = u32::read(reader.by_ref())?;
         let name = CStr::from_bytes_with_nul(reader).map_err(Error::other)?;
@@ -295,7 +295,7 @@ impl BlockIo<Context> for PathTree {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<Self, Error> {
-        let tree = PathComponentTree::read_block(i, &file, blocks, context)?;
+        let tree = PathComponentTree::read_block(i, file, blocks, context)?;
         let graph = tree
             .into_inner()
             .into_iter()
