@@ -1,16 +1,22 @@
 use std::ffi::CString;
+use std::ffi::OsStr;
 use std::io::Cursor;
 use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::SystemTime;
 
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
+use crate::receipt::FileType;
 use crate::BigEndianIo;
 use crate::BlockIo;
 use crate::Blocks;
-use crate::FileType;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -25,14 +31,8 @@ pub struct Metadata {
 
 impl Metadata {
     pub fn file_type(&self) -> FileType {
-        use MetadataExtra::*;
-        match self.extra {
-            File { .. } | Executable { .. } => FileType::File,
-            Directory { .. } => FileType::Directory,
-            Link { .. } => FileType::Link,
-            Device { .. } => FileType::Device,
-            PathOnly { file_type } => file_type,
-        }
+        // TODO
+        FileType::new(self.mode).unwrap_or(FileType::Regular)
     }
 
     pub fn mode(&self) -> u16 {
@@ -53,6 +53,25 @@ impl Metadata {
 
     pub fn size(&self) -> u64 {
         self.size
+    }
+
+    /// Last modification time.
+    pub fn modified(&self) -> Result<SystemTime, Error> {
+        let dt = Duration::from_secs(self.mtime.into());
+        SystemTime::UNIX_EPOCH
+            .checked_add(dt)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "out of range timestamp"))
+    }
+
+    pub fn checksum(&self) -> u32 {
+        match self.extra {
+            MetadataExtra::File { checksum } => checksum,
+            MetadataExtra::Executable(Executable { checksum, .. }) => checksum,
+            MetadataExtra::Directory => 0,
+            MetadataExtra::Link { checksum, .. } => checksum,
+            MetadataExtra::Device(Device { .. }) => 0,
+            MetadataExtra::PathOnly { .. } => 0,
+        }
     }
 
     fn flags(&self) -> u16 {
@@ -90,8 +109,7 @@ impl Metadata {
     }
 
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let kind: FileType = u8::read_be(reader.by_ref())?.try_into()?;
-        eprintln!("kind {:?}", kind);
+        let kind: u8 = u8::read_be(reader.by_ref())?;
         let _x0 = u8::read_be(reader.by_ref())?;
         debug_assert!(_x0 == 1, "x0 {:?}", _x0);
         let flags = u16::read_be(reader.by_ref())?;
@@ -109,15 +127,16 @@ impl Metadata {
         }
         let binary_type = get_binary_type(flags);
         let mode = u16::read_be(reader.by_ref())?;
-        let mode = mode & MODE_MASK;
+        eprintln!("read mode {:#o}", mode);
         let uid = u32::read_be(reader.by_ref())?;
         let gid = u32::read_be(reader.by_ref())?;
         let mtime = u32::read_be(reader.by_ref())?;
         let size = u32::read_be(reader.by_ref())?;
         let _x1 = u8::read_be(reader.by_ref())?;
         debug_assert!(_x1 == 1, "x1 {:?}", _x1);
-        let extra = match kind {
-            FileType::File if binary_type != BinaryType::Unknown => {
+        let file_type = FileType::new(mode)?;
+        let extra = match file_type {
+            FileType::Regular if binary_type != BinaryType::Unknown => {
                 let checksum = u32::read_be(reader.by_ref())?;
                 let flag = u8::read_be(reader.by_ref())?;
                 debug_assert!(flag == 1, "flag = {flag}");
@@ -128,7 +147,7 @@ impl Metadata {
                 }
                 MetadataExtra::Executable(Executable { checksum, arches })
             }
-            FileType::File => {
+            FileType::Regular => {
                 debug_assert!(
                     binary_type == BinaryType::Unknown,
                     "unexpected binary type {:?}",
@@ -145,7 +164,7 @@ impl Metadata {
                 );
                 MetadataExtra::Directory
             }
-            FileType::Link => {
+            FileType::Symlink => {
                 debug_assert!(
                     binary_type == BinaryType::Unknown,
                     "unexpected binary type {:?}",
@@ -154,17 +173,21 @@ impl Metadata {
                 let checksum = u32::read_be(reader.by_ref())?;
                 let name_len = u32::read_be(reader.by_ref())?;
                 debug_assert!(
-                    name_len == 0 || kind == FileType::Link,
-                    "kind = {:?}, name_len = {}",
-                    kind,
+                    name_len == 0 || file_type == FileType::Symlink,
+                    "file_type = {:?}, name_len = {}",
+                    file_type,
                     name_len
                 );
                 let mut name = vec![0_u8; name_len as usize];
                 reader.read_exact(&mut name[..])?;
                 let name = CString::from_vec_with_nul(name).map_err(Error::other)?;
-                MetadataExtra::Link { checksum, name }
+                let name = OsStr::from_bytes(name.to_bytes());
+                MetadataExtra::Link {
+                    checksum,
+                    name: name.into(),
+                }
             }
-            FileType::Device => {
+            FileType::CharDevice | FileType::BlockDevice => {
                 debug_assert!(
                     binary_type == BinaryType::Unknown,
                     "unexpected binary type {:?}",
@@ -182,21 +205,19 @@ impl Metadata {
             size: size as u64,
             extra,
         };
-        // We ignore 8 zero bytes here.
-        let trailer = u64::read_be(reader.by_ref())?;
-        debug_assert!(trailer == 0, "trailer = {trailer}, metadata = {metadata:?}");
+        // We ignore 8 zero bytes here. Bomutils' `mkbom` doesn't write them but the original `mkbom` does.
         Ok(metadata)
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        (self.file_type() as u8).write_be(writer.by_ref())?;
+        self.file_type().to_entry_type().write_be(writer.by_ref())?;
         1_u8.write_be(writer.by_ref())?;
         let flags = self.flags();
         flags.write_be(writer.by_ref())?;
         if is_path_only(flags) {
             return Ok(());
         }
-        (self.mode & MODE_MASK).write_be(writer.by_ref())?;
+        self.mode.write_be(writer.by_ref())?;
         self.uid.write_be(writer.by_ref())?;
         self.gid.write_be(writer.by_ref())?;
         self.mtime.write_be(writer.by_ref())?;
@@ -218,9 +239,11 @@ impl Metadata {
             MetadataExtra::Directory => {}
             MetadataExtra::Link { checksum, name } => {
                 checksum.write_be(writer.by_ref())?;
-                let name_bytes = name.as_bytes_with_nul();
-                (name_bytes.len() as u32).write_be(writer.by_ref())?;
+                let name_bytes = name.as_os_str().as_bytes();
+                // +1 because of the nul byte
+                ((name_bytes.len() + 1) as u32).write_be(writer.by_ref())?;
                 writer.write_all(name_bytes)?;
+                writer.write_all(&[0_u8])?;
             }
             MetadataExtra::Device(Device { dev }) => {
                 dev.write_be(writer.by_ref())?;
@@ -247,7 +270,7 @@ impl BlockIo<Context> for Metadata {
         if let Some(size) = context.file_size_64.get(&i) {
             metadata.size = *size;
         }
-        let unread_bytes = block_len - reader.len() as usize;
+        let unread_bytes = block_len - reader.len();
         debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
         Ok(metadata)
     }
@@ -273,18 +296,18 @@ impl TryFrom<std::fs::Metadata> for Metadata {
         use std::os::unix::fs::MetadataExt;
         let kind: FileType = other.file_type().try_into()?;
         let extra = match kind {
-            FileType::File => MetadataExtra::File { checksum: 0 },
+            FileType::Regular => MetadataExtra::File { checksum: 0 },
             FileType::Directory => MetadataExtra::Directory,
-            FileType::Link => MetadataExtra::Link {
+            FileType::Symlink => MetadataExtra::Link {
                 checksum: 0,
                 name: Default::default(),
             },
-            FileType::Device => MetadataExtra::Device(Device {
+            FileType::CharDevice | FileType::BlockDevice => MetadataExtra::Device(Device {
                 dev: libc_dev_to_bom_dev(other.rdev()),
             }),
         };
         Ok(Self {
-            mode: (other.mode() & 0o7777) as u16,
+            mode: other.mode() as u16,
             uid: other.uid(),
             gid: other.gid(),
             mtime: other.mtime().try_into().unwrap_or(0),
@@ -300,9 +323,9 @@ pub enum MetadataExtra {
     File { checksum: u32 },
     Executable(Executable),
     Directory,
-    Link { checksum: u32, name: CString },
+    Link { checksum: u32, name: PathBuf },
     Device(Device),
-    PathOnly { file_type: FileType },
+    PathOnly { file_type: u8 },
 }
 
 #[derive(Debug, Clone)]
@@ -315,7 +338,7 @@ pub struct Executable {
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Device {
-    dev: u32,
+    pub dev: u32,
 }
 
 impl Device {
@@ -400,8 +423,6 @@ fn libc_dev_to_bom_dev(dev: libc::dev_t) -> u32 {
     ((major & 0xff) << 24) as u32 | (minor & 0xff_ff_ff) as u32
 }
 
-const MODE_MASK: u16 = 0o7777;
-
 #[cfg(test)]
 mod tests {
     use arbitrary::Arbitrary;
@@ -443,7 +464,7 @@ mod tests {
                 })
             } else {
                 Ok(Self {
-                    mode: u.arbitrary::<u16>()? & MODE_MASK,
+                    mode: u.arbitrary::<u16>()?,
                     uid: u.arbitrary()?,
                     gid: u.arbitrary()?,
                     mtime: u.arbitrary()?,
@@ -472,7 +493,7 @@ mod tests {
                 }))
             } else {
                 Ok(Self(Metadata {
-                    mode: u.arbitrary::<u16>()? & MODE_MASK,
+                    mode: u.arbitrary::<u16>()?,
                     uid: u.arbitrary()?,
                     gid: u.arbitrary()?,
                     mtime: u.arbitrary()?,

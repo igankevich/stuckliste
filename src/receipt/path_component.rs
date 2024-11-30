@@ -101,17 +101,8 @@ impl BlockIo<Context> for PathComponentValue {
         _context: &mut Context,
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
-        eprintln!("block {}: {:?}", i, reader);
         let parent = u32::read_be(reader.by_ref())?;
         let name = CStr::from_bytes_with_nul(reader).map_err(Error::other)?;
-        //eprintln!(
-        //    "name {:?} id {} parent {} kind {:?} metadata {:?}",
-        //    name,
-        //    child.id,
-        //    parent,
-        //    child.metadata.file_type(),
-        //    child.metadata,
-        //);
         Ok(Self {
             parent,
             name: name.into(),
@@ -335,6 +326,7 @@ mod tests {
                     Symlink,
                     HardLink,
                 ],
+                false,
                 u,
             )?;
             let nodes = PathComponentVec::from_directory(directory.path()).unwrap();

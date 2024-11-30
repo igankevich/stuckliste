@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arbitrary = { version = "1.4.1", features = ["derive"] }
-arbtest = "0.3.1"
+arbitrary.workspace = true
+arbtest.workspace = true
 libc = "0.2.164"
 normalize-path = "0.2.1"
 walkdir = "2.5.0"
@@ -17,4 +17,6 @@ cpio-test = { path = "../cpio/cpio-test" }
 members = [".", "cli"]
 
 [workspace.dependencies]
+arbitrary = { version = "1.4.1", features = ["derive"] }
+arbtest = "0.3.1"
 stuckliste = { path = "." }
