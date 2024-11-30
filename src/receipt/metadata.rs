@@ -197,7 +197,7 @@ impl Metadata {
                     binary_type
                 );
                 let dev = u32::read_be(reader.by_ref())?;
-                MetadataExtra::Device(Device { dev })
+                MetadataExtra::Device(Device { dev: dev as i32 })
             }
         };
         let metadata = Self {
@@ -249,7 +249,7 @@ impl Metadata {
                 writer.write_all(&[0_u8])?;
             }
             MetadataExtra::Device(Device { dev }) => {
-                dev.write_be(writer.by_ref())?;
+                (*dev as u32).write_be(writer.by_ref())?;
             }
             MetadataExtra::PathOnly { .. } => {}
         }
@@ -306,7 +306,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
                 name: Default::default(),
             }),
             FileType::CharDevice | FileType::BlockDevice => MetadataExtra::Device(Device {
-                dev: libc_dev_to_bom_dev(other.rdev()),
+                dev: libc_dev_to_bom_dev(other.rdev()) as _,
             }),
         };
         Ok(Self {
@@ -354,11 +354,11 @@ pub struct Executable {
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Device {
-    pub dev: u32,
+    pub dev: i32,
 }
 
 impl Device {
-    pub fn rdev(&self) -> u64 {
+    pub fn rdev(&self) -> libc::dev_t {
         bom_dev_to_libc_dev(self.dev)
     }
 }
@@ -431,16 +431,17 @@ const fn is_path_only(flags: u16) -> bool {
     (flags & 0xf) == 0
 }
 
-const fn bom_dev_to_libc_dev(dev: u32) -> libc::dev_t {
-    let major = ((dev >> 24) & 0xff) as libc::c_uint;
-    let minor = (dev & 0xff_ff_ff) as libc::c_uint;
-    libc::makedev(major, minor)
+const fn bom_dev_to_libc_dev(dev: i32) -> libc::dev_t {
+    let dev = dev as u32;
+    let major = (dev >> 24) & 0xff;
+    let minor = dev & 0xff_ff_ff;
+    libc::makedev(major as _, minor as _)
 }
 
-fn libc_dev_to_bom_dev(dev: libc::dev_t) -> u32 {
+fn libc_dev_to_bom_dev(dev: libc::dev_t) -> i32 {
     let major = unsafe { libc::major(dev) };
     let minor = unsafe { libc::minor(dev) };
-    ((major & 0xff) << 24) as u32 | (minor & 0xff_ff_ff) as u32
+    (((major & 0xff) << 24) as u32 | (minor & 0xff_ff_ff) as u32) as i32
 }
 
 #[cfg(test)]
@@ -462,7 +463,7 @@ mod tests {
     #[test]
     fn bom_to_libc_symmetry() {
         arbtest(|u| {
-            let expected_bom_dev: u32 = u.arbitrary()?;
+            let expected_bom_dev: i32 = u.arbitrary()?;
             let libc_dev = bom_dev_to_libc_dev(expected_bom_dev);
             let actual_bom_dev = libc_dev_to_bom_dev(libc_dev);
             assert_eq!(expected_bom_dev, actual_bom_dev);
