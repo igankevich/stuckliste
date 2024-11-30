@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
+use std::fs::read_link;
 use std::fs::File;
 use std::io::Error;
 use std::io::Read;
@@ -31,14 +32,9 @@ use crate::Blocks;
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct PathComponentKey {
-    id: u32,
+    /// Sequential number of the path in the tree.
+    seq_no: u32,
     metadata: Metadata,
-}
-
-impl PathComponentKey {
-    pub fn id(&self) -> u32 {
-        self.id
-    }
 }
 
 impl BlockIo<Context> for PathComponentKey {
@@ -52,7 +48,7 @@ impl BlockIo<Context> for PathComponentKey {
             .metadata
             .write_block(writer.by_ref(), blocks, context)?;
         let i = blocks.append(writer.by_ref(), |writer| {
-            self.id.write_be(writer.by_ref())?;
+            self.seq_no.write_be(writer.by_ref())?;
             metadata_index.write_be(writer.by_ref())?;
             Ok(())
         })?;
@@ -66,10 +62,10 @@ impl BlockIo<Context> for PathComponentKey {
         context: &mut Context,
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
-        let id = u32::read_be(reader.by_ref())?;
+        let seq_no = u32::read_be(reader.by_ref())?;
         let i = u32::read_be(reader.by_ref())?;
         let metadata = Metadata::read_block(i, file, blocks, context)?;
-        Ok(Self { id, metadata })
+        Ok(Self { seq_no, metadata })
     }
 }
 
@@ -114,7 +110,7 @@ impl BlockIo<Context> for PathComponentValue {
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct PathComponent {
-    id: u32,
+    seq_no: u32,
     parent: u32,
     metadata: Metadata,
     name: CString,
@@ -123,7 +119,7 @@ pub struct PathComponent {
 impl PathComponent {
     pub fn new(key: PathComponentKey, value: PathComponentValue) -> Self {
         Self {
-            id: key.id,
+            seq_no: key.seq_no,
             metadata: key.metadata,
             parent: value.parent,
             name: value.name,
@@ -132,7 +128,7 @@ impl PathComponent {
 
     pub fn into_key_and_value(self) -> (PathComponentKey, PathComponentValue) {
         let key = PathComponentKey {
-            id: self.id,
+            seq_no: self.seq_no,
             metadata: self.metadata.clone(),
         };
         let value = PathComponentValue {
@@ -160,24 +156,23 @@ impl PathComponentVec {
         Self { components }
     }
 
-    fn path(&self, mut id: u32) -> Result<PathBuf, Error> {
-        let component_by_id = self
-            .components
-            .iter()
-            .map(|component| (component.id, component))
-            .collect::<HashMap<_, _>>();
+    fn path(&self, mut seq_no: u32) -> Result<PathBuf, Error> {
         let mut visited = HashSet::new();
         let mut components = Vec::new();
         loop {
-            if !visited.insert(id) {
+            if !visited.insert(seq_no) {
                 return Err(Error::other("loop"));
             }
-            let Some(node) = component_by_id.get(&id) else {
+            if seq_no == 0 {
+                break;
+            }
+            let i = seq_no - 1;
+            let Some(node) = self.components.get(i as usize) else {
                 break;
             };
             let name = OsStr::from_bytes(node.name.to_bytes());
             components.push(name);
-            id = node.parent;
+            seq_no = node.parent;
         }
         let mut path = PathBuf::new();
         path.extend(components.into_iter().rev());
@@ -187,17 +182,17 @@ impl PathComponentVec {
     pub fn to_paths(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
         let mut paths = Vec::new();
         for component in self.components.iter() {
-            let path = self.path(component.id)?;
+            let path = self.path(component.seq_no)?;
             paths.push((path, component.metadata.clone()));
         }
         Ok(paths)
     }
 
-    pub fn from_directory<P: AsRef<Path>>(directory: P) -> Result<Self, Error> {
+    pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
         // Id starts with 1.
-        let mut id: u32 = 1;
+        let mut seq_no: u32 = 1;
         for entry in WalkDir::new(directory).into_iter() {
             let entry = entry?;
             let entry_path = entry
@@ -205,28 +200,48 @@ impl PathComponentVec {
                 .strip_prefix(directory)
                 .map_err(Error::other)?
                 .normalize();
-            if entry_path == Path::new("") {
-                continue;
-            }
-            let relative_path = Path::new(".").join(entry_path);
+            //if entry_path == Path::new("") {
+            //    continue;
+            //}
+            let relative_path = if entry_path == Path::new("") {
+                Path::new(".").to_path_buf()
+            } else {
+                Path::new(".").join(entry_path)
+            };
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
-            let metadata = std::fs::metadata(entry.path())?;
+            let metadata = std::fs::symlink_metadata(entry.path())?;
             let mut metadata: Metadata = metadata.try_into()?;
-            match metadata.extra {
-                MetadataExtra::File {
-                    ref mut checksum, ..
+            if paths_only {
+                metadata.mode = 0;
+                metadata.uid = 0;
+                metadata.gid = 0;
+                metadata.mtime = 0;
+                metadata.size = 0;
+                metadata.extra = MetadataExtra::PathOnly {
+                    entry_type: metadata.file_type().to_entry_type(),
+                };
+            } else {
+                match metadata.extra {
+                    MetadataExtra::File {
+                        ref mut checksum, ..
+                    } => {
+                        let crc_reader = CrcReader::new(File::open(entry.path())?);
+                        *checksum = crc_reader.digest()?;
+                    }
+                    MetadataExtra::Link(Link {
+                        ref mut name,
+                        ref mut checksum,
+                    }) => {
+                        *name = read_link(entry.path())?;
+                        let crc_reader = CrcReader::new(name.as_os_str().as_bytes());
+                        *checksum = crc_reader.digest()?;
+                    }
+                    _ => {}
                 }
-                | MetadataExtra::Link(Link {
-                    ref mut checksum, ..
-                }) => {
-                    let crc_reader = CrcReader::new(File::open(entry.path())?);
-                    *checksum = crc_reader.digest()?;
-                }
-                _ => {}
             }
             let parent = match dirname {
-                Some(d) => components.get(d).map(|node| node.id).unwrap_or(0),
+                Some(d) => components.get(d).map(|node| node.seq_no).unwrap_or(0),
                 None => 0,
             };
             let name = match basename {
@@ -235,15 +250,16 @@ impl PathComponentVec {
             };
             let name = CString::new(name).map_err(Error::other)?;
             let node = PathComponent {
-                id,
+                seq_no,
                 parent,
                 name,
                 metadata,
             };
             components.insert(relative_path, node);
-            id += 1;
+            seq_no += 1;
         }
-        let components = components.into_values().collect();
+        let mut components: Vec<_> = components.into_values().collect();
+        components.sort_unstable_by(|a, b| a.seq_no.cmp(&b.seq_no));
         Ok(Self { components })
     }
 }
@@ -255,6 +271,7 @@ impl BlockIo<Context> for PathComponentVec {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
+        eprintln!("write tree {:#?}", self.components);
         let paths = PathComponentTree::new(
             self.iter()
                 .cloned()
@@ -272,12 +289,13 @@ impl BlockIo<Context> for PathComponentVec {
         context: &mut Context,
     ) -> Result<Self, Error> {
         let tree = PathComponentTree::read_block(i, file, blocks, context)?;
-        let graph = tree
+        let components: Vec<_> = tree
             .into_inner()
             .into_iter()
             .map(|(k, v)| PathComponent::new(k, v))
             .collect();
-        Ok(PathComponentVec::new(graph))
+        eprintln!("read tree {:#?}", components);
+        Ok(PathComponentVec::new(components))
     }
 }
 
@@ -329,7 +347,8 @@ mod tests {
                     HardLink,
                 ])
                 .create(u)?;
-            let nodes = PathComponentVec::from_directory(directory.path()).unwrap();
+            let paths_only = u.arbitrary()?;
+            let nodes = PathComponentVec::from_directory(directory.path(), paths_only).unwrap();
             Ok(nodes)
         }
     }

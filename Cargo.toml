@@ -1,6 +1,6 @@
 [package]
 name = "stuckliste"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0"
 
@@ -20,7 +20,7 @@ members = [".", "cli"]
 [workspace.dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"] }
 arbtest = "0.3.1"
-random-dir = { git = "https://github.com/igankevich/kpea", version = "0.2.2", tag = "0.2.2" }
+random-dir = { git = "https://github.com/igankevich/kpea", version = "0.2.3", tag = "0.2.3" }
 stuckliste = { path = "." }
 
 [lints.clippy]

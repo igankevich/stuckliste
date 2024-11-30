@@ -20,7 +20,8 @@ use crate::Blocks;
 use crate::Bom;
 use crate::NamedBlocks;
 
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
+#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Receipt {
     tree: PathComponentVec,
 }
@@ -30,8 +31,8 @@ impl Receipt {
         self.tree.to_paths()
     }
 
-    pub fn from_directory<P: AsRef<Path>>(directory: P) -> Result<Self, Error> {
-        let tree = PathComponentVec::from_directory(directory)?;
+    pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
+        let tree = PathComponentVec::from_directory(directory, paths_only)?;
         Ok(Self { tree })
     }
 
@@ -146,5 +147,13 @@ mod tests {
             assert_eq!(expected, actual);
             Ok(())
         });
+    }
+
+    #[test]
+    fn bom_read() {
+        let bom = Receipt::read(std::fs::File::open("our-good.bom").unwrap()).unwrap();
+        eprintln!("good bom {:#?}", bom);
+        let bom = Receipt::read(std::fs::File::open("our-bad.bom").unwrap()).unwrap();
+        eprintln!("bad bom {:#?}", bom);
     }
 }

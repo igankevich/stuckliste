@@ -77,13 +77,23 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 let value = value.write_block(writer.by_ref(), blocks, context)?;
                 raw_entries.push((key, value));
             }
+            //let last_value_block = raw_entries.last().map(|x| x.1).unwrap_or(0);
             let data_node = RawTreeNode {
                 next: 0,
                 prev: 0,
                 entries: raw_entries,
                 is_data: true,
             };
+
             blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?
+            //let raw_entries = vec![(block, last_value_block)];
+            //let meta_node = RawTreeNode {
+            //    next: 0,
+            //    prev: 0,
+            //    entries: raw_entries,
+            //    is_data: false,
+            //};
+            //blocks.append(writer.by_ref(), |writer| meta_node.write_be(writer))?
         } else {
             let num_data_nodes = num_entries.div_ceil(n);
             let num_meta_nodes = num_data_nodes.div_ceil(n);
@@ -189,6 +199,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 continue;
             }
             let node = RawTreeNode::read_be(blocks.slice(node, file)?)?;
+            eprintln!("tree node {:?}", node);
             if node.is_data {
                 // data node
                 for (key, value) in node.entries.into_iter() {
@@ -219,6 +230,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
     }
 }
 
+#[derive(Debug)]
 struct RawTree {
     root: u32,
     block_len: u32,
@@ -265,6 +277,7 @@ impl BigEndianIo for RawTree {
     }
 }
 
+#[derive(Debug)]
 struct RawTreeNode {
     next: u32,
     prev: u32,

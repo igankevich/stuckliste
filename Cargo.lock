@@ -298,8 +298,8 @@ dependencies = [
 
 [[package]]
 name = "random-dir"
-version = "0.2.2"
-source = "git+https://github.com/igankevich/kpea?tag=0.2.2#9fa81e6f186f902a02395d98f1ac2b4c8782840e"
+version = "0.2.3"
+source = "git+https://github.com/igankevich/kpea?tag=0.2.3#3cc474aaece6f0d124d1125426256263c4d60503"
 dependencies = [
  "arbitrary",
  "libc",
@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "stuckliste"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arbitrary",
  "arbtest",

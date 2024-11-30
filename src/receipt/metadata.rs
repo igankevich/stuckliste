@@ -22,10 +22,10 @@ use crate::Blocks;
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Metadata {
-    mode: u16,
-    uid: u32,
-    gid: u32,
-    mtime: u32,
+    pub(crate) mode: u16,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+    pub(crate) mtime: u32,
     pub(crate) size: u64,
     pub extra: MetadataExtra,
 }
