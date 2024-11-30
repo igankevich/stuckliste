@@ -12,7 +12,7 @@ normalize-path = "0.2.1"
 walkdir = "2.5.0"
 
 [dev-dependencies]
-random-dir = { path = "../cpio/random-dir", version = "0.2.1" }
+random-dir.workspace = true
 
 [workspace]
 members = [".", "cli"]
@@ -20,6 +20,7 @@ members = [".", "cli"]
 [workspace.dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"] }
 arbtest = "0.3.1"
+random-dir = { git = "https://github.com/igankevich/kpea", version = "0.2.1", tag = "0.2.1" }
 stuckliste = { path = "." }
 
 [lints.clippy]

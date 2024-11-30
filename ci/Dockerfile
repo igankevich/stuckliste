@@ -36,8 +36,9 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get -qq update \
     && apt-get -qq install --no-install-recommends \
     g++ make \
-    && git clone --depth=1 --branch=master https://github.com/hogliux/bomutils /tmp/bomutils \
+    && git clone https://github.com/hogliux/bomutils /tmp/bomutils \
     && cd /tmp/bomutils \
+    && git checkout 14f5d09d6c62fef7539ebdd23ebcd42ab54f7351 \
     && make \
     && make install \
     && cd / \

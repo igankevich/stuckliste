@@ -299,6 +299,7 @@ dependencies = [
 [[package]]
 name = "random-dir"
 version = "0.2.1"
+source = "git+https://github.com/igankevich/kpea?tag=0.2.1#3b8efa177b3bdbe1724340c12fc188e48bc46af9"
 dependencies = [
  "arbitrary",
  "libc",
