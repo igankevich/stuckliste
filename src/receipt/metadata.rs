@@ -431,11 +431,17 @@ const fn is_path_only(flags: u16) -> bool {
     (flags & 0xf) == 0
 }
 
+#[cfg(target_os = "linux")]
 const fn bom_dev_to_libc_dev(dev: i32) -> libc::dev_t {
     let dev = dev as u32;
     let major = (dev >> 24) & 0xff;
     let minor = dev & 0xff_ff_ff;
-    libc::makedev(major as _, minor as _)
+    libc::makedev(major, minor)
+}
+
+#[cfg(target_os = "macos")]
+const fn bom_dev_to_libc_dev(dev: i32) -> libc::dev_t {
+    dev
 }
 
 fn libc_dev_to_bom_dev(dev: libc::dev_t) -> i32 {

@@ -43,7 +43,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && make install \
     && cd / \
     && rm -rf /tmp/bomutils \
-    && apt-get -qq purge g++ make \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/staex-io/cijail:latest / /usr/local
