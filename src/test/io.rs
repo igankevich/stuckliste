@@ -9,7 +9,10 @@ pub fn test_be_io_symmetry<T: for<'a> Arbitrary<'a> + Debug + Eq + BigEndianIo>(
     test_be_io_symmetry_convert::<T, T>();
 }
 
-pub fn test_be_io_symmetry_convert<X: for<'a> Arbitrary<'a>, T: From<X> + Debug + Eq + BigEndianIo>() {
+pub fn test_be_io_symmetry_convert<
+    X: for<'a> Arbitrary<'a>,
+    T: From<X> + Debug + Eq + BigEndianIo,
+>() {
     arbtest(|u| {
         let expected: X = u.arbitrary()?;
         let expected: T = expected.into();

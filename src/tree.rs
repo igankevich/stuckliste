@@ -103,6 +103,7 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                         let value = value.write_block(writer.by_ref(), blocks, context)?;
                         raw_entries.push((key, value));
                     }
+                    #[allow(clippy::expect_used)]
                     let last_value_block =
                         raw_entries.last().expect("We have at least one entry").1;
                     let data_node = RawTreeNode {
@@ -129,7 +130,8 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                     } else {
                         current_block + 1
                     };
-                    let block = blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?;
+                    let block =
+                        blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?;
                     debug_assert!(block == current_block);
                     current_block += 1;
                     raw_entries.push((block, last_value_block));
