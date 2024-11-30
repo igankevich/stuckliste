@@ -32,3 +32,13 @@ jobs:
             ${{ env.CIJAIL_ENDPOINTS }}
             https://crates.io/api/v1/crates/new
         run: cijail ./ci/publish.sh
+  macos:
+    runs-on: macos-latest
+    env:
+      TZ: Europe/Berlin
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo test --workspace --all-targets
