@@ -321,7 +321,9 @@ mod tests {
                 .file_types([
                     Regular,
                     Directory,
+                    #[cfg(not(target_os = "macos"))]
                     BlockDevice,
+                    #[cfg(not(target_os = "macos"))]
                     CharDevice,
                     Symlink,
                     HardLink,

@@ -113,7 +113,9 @@ fn random_directory(u: &mut Unstructured<'_>) -> arbitrary::Result<Dir> {
         .file_types([
             Regular,
             Directory,
+            #[cfg(not(target_os = "macos"))]
             BlockDevice,
+            #[cfg(not(target_os = "macos"))]
             CharDevice,
             Symlink,
             HardLink,
