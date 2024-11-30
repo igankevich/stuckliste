@@ -102,10 +102,10 @@ impl Default for NamedBlocks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::test_write_read;
+    use crate::test::test_be_io_symmetry;
 
     #[test]
     fn write_read() {
-        test_write_read::<NamedBlocks>();
+        test_be_io_symmetry::<NamedBlocks>();
     }
 }

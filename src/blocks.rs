@@ -200,12 +200,12 @@ impl BigEndianIo for Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::test_write_read;
+    use crate::test::test_be_io_symmetry;
 
     #[test]
     fn write_read() {
-        test_write_read::<Blocks>();
-        test_write_read::<Block>();
+        test_be_io_symmetry::<Blocks>();
+        test_be_io_symmetry::<Block>();
     }
 
     impl Blocks {

@@ -114,11 +114,11 @@ const DEFAULT_X2: u32 = 0;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::test_write_read;
+    use crate::test::test_be_io_symmetry;
 
     #[test]
     fn write_read_symmetry() {
-        test_write_read::<BomInfo>();
-        test_write_read::<BomInfoEntry>();
+        test_be_io_symmetry::<BomInfo>();
+        test_be_io_symmetry::<BomInfoEntry>();
     }
 }

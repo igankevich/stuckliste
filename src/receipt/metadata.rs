@@ -394,13 +394,13 @@ mod tests {
     use arbtest::arbtest;
 
     use super::*;
-    use crate::test::test_write_read;
-    use crate::test::test_write_read_convert;
+    use crate::test::test_be_io_symmetry;
+    use crate::test::test_be_io_symmetry_convert;
 
     #[test]
     fn write_read_symmetry() {
-        test_write_read_convert::<Metadata32, Metadata>();
-        test_write_read::<ExeArch>();
+        test_be_io_symmetry_convert::<Metadata32, Metadata>();
+        test_be_io_symmetry::<ExeArch>();
     }
 
     #[test]
