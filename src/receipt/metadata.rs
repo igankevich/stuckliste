@@ -306,7 +306,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
                 name: Default::default(),
             }),
             FileType::CharDevice | FileType::BlockDevice => MetadataExtra::Device(Device {
-                dev: libc_dev_to_bom_dev(other.rdev()) as _,
+                dev: other.rdev() as i32,
             }),
         };
         Ok(Self {
@@ -355,12 +355,6 @@ pub struct Executable {
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Device {
     pub dev: i32,
-}
-
-impl Device {
-    pub fn rdev(&self) -> libc::dev_t {
-        bom_dev_to_libc_dev(self.dev)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -431,30 +425,10 @@ const fn is_path_only(flags: u16) -> bool {
     (flags & 0xf) == 0
 }
 
-#[cfg(target_os = "linux")]
-const fn bom_dev_to_libc_dev(dev: i32) -> libc::dev_t {
-    let dev = dev as u32;
-    let major = (dev >> 24) & 0xff;
-    let minor = dev & 0xff_ff_ff;
-    libc::makedev(major, minor)
-}
-
-#[cfg(target_os = "macos")]
-const fn bom_dev_to_libc_dev(dev: i32) -> libc::dev_t {
-    dev
-}
-
-fn libc_dev_to_bom_dev(dev: libc::dev_t) -> i32 {
-    let major = unsafe { libc::major(dev) };
-    let minor = unsafe { libc::minor(dev) };
-    (((major & 0xff) << 24) as u32 | (minor & 0xff_ff_ff) as u32) as i32
-}
-
 #[cfg(test)]
 mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
-    use arbtest::arbtest;
 
     use super::*;
     use crate::test::block_io_symmetry_convert;
@@ -464,17 +438,6 @@ mod tests {
     fn write_read_symmetry() {
         block_io_symmetry_convert::<Metadata32, Metadata>();
         test_be_io_symmetry::<ExeArch>();
-    }
-
-    #[test]
-    fn bom_to_libc_symmetry() {
-        arbtest(|u| {
-            let expected_bom_dev: i32 = u.arbitrary()?;
-            let libc_dev = bom_dev_to_libc_dev(expected_bom_dev);
-            let actual_bom_dev = libc_dev_to_bom_dev(libc_dev);
-            assert_eq!(expected_bom_dev, actual_bom_dev);
-            Ok(())
-        });
     }
 
     impl<'a> Arbitrary<'a> for Metadata {

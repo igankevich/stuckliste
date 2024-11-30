@@ -18,6 +18,7 @@ jobs:
         https://index.crates.io/
         https://github.com/rustsec/advisory-db
         https://static.rust-lang.org/dist/
+        https://github.com/igankevich/kpea/
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4
