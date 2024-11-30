@@ -107,13 +107,11 @@ mod tests {
 
     #[test]
     fn write_read() {
-        // TODO replace??
         arbtest(|u| {
             let expected: Bom = u.arbitrary()?;
             let mut writer = Cursor::new(Vec::new());
             expected.write(&mut writer).unwrap();
             let bytes = writer.into_inner();
-            eprintln!("magic {:x?}", &bytes);
             let actual = Bom::read(&bytes[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())

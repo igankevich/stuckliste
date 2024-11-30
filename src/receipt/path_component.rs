@@ -44,12 +44,9 @@ impl BlockIo<Context> for PathComponentKey {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
-        let metadata_index =
-            blocks.append(writer.by_ref(), |writer| self.metadata.write_be(writer))?;
-        let file_size = self.metadata.size();
-        if file_size > u32::MAX as u64 {
-            context.file_size_64.insert(metadata_index, file_size);
-        }
+        let metadata_index = self
+            .metadata
+            .write_block(writer.by_ref(), blocks, context)?;
         let i = blocks.append(writer.by_ref(), |writer| {
             self.id.write_be(writer.by_ref())?;
             metadata_index.write_be(writer.by_ref())?;
@@ -66,18 +63,8 @@ impl BlockIo<Context> for PathComponentKey {
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
         let id = u32::read_be(reader.by_ref())?;
-        eprintln!("id {}", id);
         let i = u32::read_be(reader.by_ref())?;
-        let reader = blocks.slice(i, file)?;
-        let block_len = reader.len();
-        let mut reader = std::io::Cursor::new(reader);
-        let mut metadata = Metadata::read_be(reader.by_ref())?;
-        // TODO move to Metadata?? need to implement BlockIo for Metadata
-        if let Some(size) = context.file_size_64.get(&i) {
-            metadata.size = *size;
-        }
-        let unread_bytes = block_len - reader.position() as usize;
-        debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
+        let metadata = Metadata::read_block(i, file, blocks, context)?;
         Ok(Self { id, metadata })
     }
 }

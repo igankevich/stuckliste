@@ -1,34 +1,17 @@
 use std::ffi::CString;
+use std::io::Cursor;
 use std::io::Error;
 use std::io::Read;
+use std::io::Seek;
 use std::io::Write;
 
 use crate::receipt::BomInfo;
+use crate::receipt::Context;
 use crate::BigEndianIo;
+use crate::BlockIo;
+use crate::Blocks;
 use crate::FileType;
 
-/*
-Device len 35
-Directory len 31
-File len 35
-Link len 45
-
-
-01, // is executable flag?
-00, 00, 00, 02, // num arch
-01, 00, 00, 07, // cpu_type_t
-00, 00, 00, 03, // cpu_subtype_t
-00, 00, df, 50, // offset
-f1, 7d, 04, dd, // checksum
-01, 00, 00, 0c, // cpu_type_t
-80, 00, 00, 02, // cpu_subtype_t
-00, 00, de, 80, // offset
-5d, 06, d1, ec, // checksum
-00, 00, 00, 00, 00, 00, 00, 00 // trailer
-
-
-
-*/
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Metadata {
@@ -105,10 +88,8 @@ impl Metadata {
             _ => stats.accumulate(0, self.size as u32),
         }
     }
-}
 
-impl BigEndianIo for Metadata {
-    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let kind: FileType = u8::read_be(reader.by_ref())?.try_into()?;
         eprintln!("kind {:?}", kind);
         let _x0 = u8::read_be(reader.by_ref())?;
@@ -207,7 +188,7 @@ impl BigEndianIo for Metadata {
         Ok(metadata)
     }
 
-    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         (self.file_type() as u8).write_be(writer.by_ref())?;
         1_u8.write_be(writer.by_ref())?;
         let flags = self.flags();
@@ -249,6 +230,40 @@ impl BigEndianIo for Metadata {
         // Block always ends with 8 zeroes.
         writer.write_all(&[0_u8; 8])?;
         Ok(())
+    }
+}
+
+impl BlockIo<Context> for Metadata {
+    fn read_block(
+        i: u32,
+        file: &[u8],
+        blocks: &mut Blocks,
+        context: &mut Context,
+    ) -> Result<Self, Error> {
+        let reader = blocks.slice(i, file)?;
+        let block_len = reader.len();
+        let mut cursor = Cursor::new(reader);
+        let mut metadata = Self::read(cursor.by_ref())?;
+        if let Some(size) = context.file_size_64.get(&i) {
+            metadata.size = *size;
+        }
+        let unread_bytes = block_len - reader.len() as usize;
+        debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
+        Ok(metadata)
+    }
+
+    fn write_block<W: Write + Seek>(
+        &self,
+        mut writer: W,
+        blocks: &mut Blocks,
+        context: &mut Context,
+    ) -> Result<u32, Error> {
+        let i = blocks.append(writer.by_ref(), |writer| self.write(writer))?;
+        let file_size = self.size();
+        if file_size > u32::MAX as u64 {
+            context.file_size_64.insert(i, file_size);
+        }
+        Ok(i)
     }
 }
 
@@ -314,7 +329,7 @@ impl Device {
 pub struct ExeArch {
     pub cpu_type: u32,
     pub cpu_sub_type: u32,
-    // TODO what if the size is u64?
+    // If the actual binary size is u64 then this field overflows.
     pub size: u32,
     pub checksum: u32,
 }
@@ -394,12 +409,12 @@ mod tests {
     use arbtest::arbtest;
 
     use super::*;
+    use crate::test::block_io_symmetry_convert;
     use crate::test::test_be_io_symmetry;
-    use crate::test::test_be_io_symmetry_convert;
 
     #[test]
     fn write_read_symmetry() {
-        test_be_io_symmetry_convert::<Metadata32, Metadata>();
+        block_io_symmetry_convert::<Metadata32, Metadata>();
         test_be_io_symmetry::<ExeArch>();
     }
 

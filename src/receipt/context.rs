@@ -10,7 +10,6 @@ pub struct Context {
     /// Metadata block index to path mapping.
     pub hard_links: HardLinks,
 }
-// TODO add blocks?
 
 impl Context {
     pub fn new() -> Self {
