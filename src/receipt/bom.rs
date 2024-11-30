@@ -142,7 +142,6 @@ mod tests {
             let mut writer = Cursor::new(Vec::new());
             expected.write(&mut writer).unwrap();
             let bytes = writer.into_inner();
-            eprintln!("magic {:x?}", &bytes[..8]);
             let actual = Receipt::read(&bytes[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
