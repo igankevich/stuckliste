@@ -94,11 +94,7 @@ impl Receipt {
         let mut blocks = header.blocks;
         let mut named_blocks = header.named_blocks;
         eprintln!("{:#?}", named_blocks);
-        {
-            let name = BOM_INFO;
-            let index = named_blocks
-                .remove(name)
-                .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
+        if let Some(index) = named_blocks.remove(BOM_INFO) {
             let bom_info = BomInfo::read(blocks.slice(index, &file)?)?;
             eprintln!("{:?}", bom_info);
         }
@@ -158,22 +154,24 @@ mod tests {
 
     #[test]
     fn bom_read() {
-        //for filename in [
-        //    //"block.bom",
-        //    //"char.bom",
-        //    //"dir.bom",
-        //    //"file.bom",
-        //    "hardlink.bom",
-        //    //"symlink.bom",
-        //    //"exe.bom",
-        //    //"size64.bom",
-        //] {
-        //    Receipt::read(File::open(filename).unwrap()).unwrap();
-        //}
-        Receipt::read(
-            File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
-        )
-        .unwrap();
+        for filename in [
+            //"block.bom",
+            //"char.bom",
+            //"dir.bom",
+            //"file.bom",
+            //"hardlink.bom",
+            //"symlink.bom",
+            //"exe.bom",
+            //"size64.bom",
+            //"file-path-only.bom",
+            "exe-path-only.bom",
+        ] {
+            Receipt::read(File::open(filename).unwrap()).unwrap();
+        }
+        //Receipt::read(
+        //    File::open("boms/com.apple.pkg.MAContent10_PremiumPreLoopsDeepHouse.bom").unwrap(),
+        //)
+        //.unwrap();
         //Receipt::read(File::open("boms/com.apple.pkg.CLTools_SDK_macOS12.bom").unwrap()).unwrap();
         //Receipt::read(File::open("cars/0E9C2921-1D9F-4EE8-8E47-A8AB1737DF6E.car").unwrap()).unwrap();
         //for entry in WalkDir::new("boms").into_iter() {

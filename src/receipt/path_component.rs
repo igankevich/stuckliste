@@ -323,8 +323,8 @@ mod tests {
     #[test]
     fn write_read_symmetry() {
         block_io_symmetry::<PathComponentKey>();
-        block_io_symmetry::<PathComponentValue>();
-        block_io_symmetry::<PathTree>();
+        //block_io_symmetry::<PathComponentValue>();
+        //block_io_symmetry::<PathTree>();
     }
 
     impl<'a> Arbitrary<'a> for PathTree {

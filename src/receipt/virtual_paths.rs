@@ -35,6 +35,7 @@ impl BlockIo<Context> for VirtualPathTree {
         context: &mut Context,
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, &file)?;
+        eprintln!("vindex block {:?}", reader);
         let version = u32::read(reader.by_ref())?;
         if version != Self::VERSION {
             return Err(Error::other(format!(
@@ -44,12 +45,15 @@ impl BlockIo<Context> for VirtualPathTree {
         }
         let i = u32::read(reader.by_ref())?;
         let _x0 = u32::read(reader.by_ref())?;
+        eprintln!("vindex x0 {}", _x0);
         // TODO
         //debug_assert!(_x0 == 0, "x0 = {}", _x0);
         let _x1 = u8::read(reader.by_ref())?;
+        eprintln!("vindex x1 {}", _x1);
         // TODO
         //debug_assert!(_x1 == DEFAULT_X1, "x1 = {_x1}");
         let tree = VecTree::read_block(i, &file, blocks, context)?;
+        eprintln!("vindex len {}", tree.len());
         Ok(Self { tree })
     }
 

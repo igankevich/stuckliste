@@ -49,6 +49,7 @@ impl Metadata {
             Directory { .. } => FileType::Directory,
             Link { .. } => FileType::Link,
             Device { .. } => FileType::Device,
+            PathOnly { file_type } => file_type,
         }
     }
 
@@ -72,16 +73,26 @@ impl Metadata {
         self.size
     }
 
-    fn arch(&self) -> u16 {
-        // arch 0xN00f
+    fn flags(&self) -> u16 {
+        // flags 0xN00P
         // N - no. of architectures in a fat binary
-        // f - always 0xf
-        match self.extra {
+        // P - 0xf for regular bom, 0 for path-only bom
+        let path_only = match self.extra {
+            MetadataExtra::PathOnly { .. } => 0_u16,
+            _ => 0xf_u16,
+        };
+        let binary_type = match self.extra {
             MetadataExtra::Executable(Executable { ref arches, .. }) => {
-                0x0f_u16 | (((arches.len() & 0xf).min(MAX_ARCHES) as u16) << 12)
+                // TODO this probably depends on file magic, not on the number of arches
+                if arches.len() == 1 {
+                    BinaryType::Executable as u16
+                } else {
+                    BinaryType::Fat as u16
+                }
             }
-            _ => 0x0f_u16,
-        }
+            _ => BinaryType::Unknown as u16,
+        };
+        ((binary_type & 0xf) << 12) | (path_only & 0xf)
     }
 
     pub(crate) fn accumulate(&self, stats: &mut BomInfo) {
@@ -100,10 +111,23 @@ impl Metadata {
 impl BigEndianIo for Metadata {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let kind: FileType = u8::read(reader.by_ref())?.try_into()?;
+        eprintln!("kind {:?}", kind);
         let _x0 = u8::read(reader.by_ref())?;
         debug_assert!(_x0 == 1, "x0 {:?}", _x0);
-        let arch = u16::read(reader.by_ref())?;
-        let num_arch = (arch >> 12) & 0xf;
+        let flags = u16::read(reader.by_ref())?;
+        if is_path_only(flags) {
+            // This BOM stores paths only.
+            let metadata = Self {
+                mode: 0,
+                uid: 0,
+                gid: 0,
+                mtime: 0,
+                size: 0,
+                extra: MetadataExtra::PathOnly { file_type: kind },
+            };
+            return Ok(metadata);
+        }
+        let binary_type = get_binary_type(flags);
         let mode = u16::read(reader.by_ref())?;
         let mode = mode & MODE_MASK;
         let uid = u32::read(reader.by_ref())?;
@@ -113,15 +137,11 @@ impl BigEndianIo for Metadata {
         let _x1 = u8::read(reader.by_ref())?;
         debug_assert!(_x1 == 1, "x1 {:?}", _x1);
         let extra = match kind {
-            FileType::File if num_arch != 0 => {
+            FileType::File if binary_type != BinaryType::Unknown => {
                 let checksum = u32::read(reader.by_ref())?;
                 let flag = u8::read(reader.by_ref())?;
                 debug_assert!(flag == 1, "flag = {flag}");
                 let num_arch_again = u32::read(reader.by_ref())?;
-                debug_assert!(
-                    num_arch_again.min(MAX_ARCHES as u32) == num_arch as u32,
-                    "num_arch = {num_arch}, num_arch_again = {num_arch_again}",
-                );
                 let mut arches = Vec::with_capacity(num_arch_again as usize);
                 for _ in 0..num_arch_again {
                     arches.push(ExeArch::read(reader.by_ref())?);
@@ -129,16 +149,28 @@ impl BigEndianIo for Metadata {
                 MetadataExtra::Executable(Executable { checksum, arches })
             }
             FileType::File => {
-                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
+                debug_assert!(
+                    binary_type == BinaryType::Unknown,
+                    "unexpected binary type {:?}",
+                    binary_type
+                );
                 let checksum = u32::read(reader.by_ref())?;
                 MetadataExtra::File { checksum }
             }
             FileType::Directory => {
-                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
+                debug_assert!(
+                    binary_type == BinaryType::Unknown,
+                    "unexpected binary type {:?}",
+                    binary_type
+                );
                 MetadataExtra::Directory
             }
             FileType::Link => {
-                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
+                debug_assert!(
+                    binary_type == BinaryType::Unknown,
+                    "unexpected binary type {:?}",
+                    binary_type
+                );
                 let checksum = u32::read(reader.by_ref())?;
                 let name_len = u32::read(reader.by_ref())?;
                 debug_assert!(
@@ -153,7 +185,11 @@ impl BigEndianIo for Metadata {
                 MetadataExtra::Link { checksum, name }
             }
             FileType::Device => {
-                debug_assert!(num_arch == 0, "num_arch = {num_arch}");
+                debug_assert!(
+                    binary_type == BinaryType::Unknown,
+                    "unexpected binary type {:?}",
+                    binary_type
+                );
                 let dev = u32::read(reader.by_ref())?;
                 MetadataExtra::Device(Device { dev })
             }
@@ -175,7 +211,11 @@ impl BigEndianIo for Metadata {
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         (self.file_type() as u8).write(writer.by_ref())?;
         1_u8.write(writer.by_ref())?;
-        self.arch().write(writer.by_ref())?;
+        let flags = self.flags();
+        flags.write(writer.by_ref())?;
+        if is_path_only(flags) {
+            return Ok(());
+        }
         (self.mode & MODE_MASK).write(writer.by_ref())?;
         write_be(writer.by_ref(), self.uid)?;
         write_be(writer.by_ref(), self.gid)?;
@@ -205,6 +245,7 @@ impl BigEndianIo for Metadata {
             MetadataExtra::Device(Device { dev }) => {
                 write_be(writer.by_ref(), *dev)?;
             }
+            MetadataExtra::PathOnly { .. } => {}
         }
         // Block always ends with 8 zeroes.
         writer.write_all(&[0_u8; 8])?;
@@ -247,6 +288,7 @@ pub enum MetadataExtra {
     Directory,
     Link { checksum: u32, name: CString },
     Device(Device),
+    PathOnly { file_type: FileType },
 }
 
 #[derive(Debug, Clone)]
@@ -301,6 +343,37 @@ impl BigEndianIo for ExeArch {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[repr(u8)]
+pub enum BinaryType {
+    /// Regular file.
+    Unknown = 0,
+    /// Single-architecture executable file.
+    Executable = 1,
+    /// Multiple-architectures executable file (universal binary).
+    Fat = 2,
+}
+
+fn get_binary_type(flags: u16) -> BinaryType {
+    const UNKNOWN: u8 = BinaryType::Unknown as u8;
+    const EXECUTABLE: u8 = BinaryType::Executable as u8;
+    const FAT: u8 = BinaryType::Fat as u8;
+    match ((flags >> 12) & 0xf) as u8 {
+        UNKNOWN => BinaryType::Unknown,
+        EXECUTABLE => BinaryType::Executable,
+        FAT => BinaryType::Fat,
+        other => {
+            eprintln!("unknown binary type: {}", other);
+            BinaryType::Unknown
+        }
+    }
+}
+
+const fn is_path_only(flags: u16) -> bool {
+    (flags & 0xf) == 0
+}
+
 const fn bom_dev_to_libc_dev(dev: u32) -> libc::dev_t {
     let major = ((dev >> 24) & 0xff) as libc::c_uint;
     let minor = (dev & 0xff_ff_ff) as libc::c_uint;
@@ -314,9 +387,6 @@ fn libc_dev_to_bom_dev(dev: libc::dev_t) -> u32 {
 }
 
 const MODE_MASK: u16 = 0o7777;
-
-/// Max. no. of architectures in flags.
-const MAX_ARCHES: usize = 2;
 
 #[cfg(test)]
 mod tests {
@@ -347,14 +417,26 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for Metadata {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            Ok(Self {
-                mode: u.arbitrary::<u16>()? & MODE_MASK,
-                uid: u.arbitrary()?,
-                gid: u.arbitrary()?,
-                mtime: u.arbitrary()?,
-                size: u.arbitrary()?,
-                extra: u.arbitrary()?,
-            })
+            let extra: MetadataExtra = u.arbitrary()?;
+            if matches!(extra, MetadataExtra::PathOnly { .. }) {
+                Ok(Metadata {
+                    mode: 0,
+                    uid: 0,
+                    gid: 0,
+                    mtime: 0,
+                    size: 0,
+                    extra,
+                })
+            } else {
+                Ok(Self {
+                    mode: u.arbitrary::<u16>()? & MODE_MASK,
+                    uid: u.arbitrary()?,
+                    gid: u.arbitrary()?,
+                    mtime: u.arbitrary()?,
+                    size: u.arbitrary()?,
+                    extra,
+                })
+            }
         }
     }
 
@@ -363,14 +445,26 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for Metadata32 {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            Ok(Self(Metadata {
-                mode: u.arbitrary::<u16>()? & MODE_MASK,
-                uid: u.arbitrary()?,
-                gid: u.arbitrary()?,
-                mtime: u.arbitrary()?,
-                size: u.arbitrary::<u32>()? as u64,
-                extra: u.arbitrary()?,
-            }))
+            let extra: MetadataExtra = u.arbitrary()?;
+            if matches!(extra, MetadataExtra::PathOnly { .. }) {
+                Ok(Self(Metadata {
+                    mode: 0,
+                    uid: 0,
+                    gid: 0,
+                    mtime: 0,
+                    size: 0,
+                    extra,
+                }))
+            } else {
+                Ok(Self(Metadata {
+                    mode: u.arbitrary::<u16>()? & MODE_MASK,
+                    uid: u.arbitrary()?,
+                    gid: u.arbitrary()?,
+                    mtime: u.arbitrary()?,
+                    size: u.arbitrary::<u32>()? as u64,
+                    extra,
+                }))
+            }
         }
     }
 
