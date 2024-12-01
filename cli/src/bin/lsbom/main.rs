@@ -134,8 +134,8 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                     Some(ref arch) => {
                         let cpu_type = arch_to_cpu_type(arch)?;
                         for arch in exe.arches().iter() {
-                            if cpu_type == arch.cpu_type {
-                                write!(&mut line, "\t{}\t{}", arch.size, arch.checksum)
+                            if cpu_type == arch.cpu_type() {
+                                write!(&mut line, "\t{}\t{}", arch.size(), arch.checksum())
                                     .map_err(Error::other)?;
                                 print = true;
                                 break;

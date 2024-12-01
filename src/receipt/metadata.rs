@@ -24,74 +24,6 @@ use crate::Blocks;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-struct Common {
-    mode: u16,
-    uid: u32,
-    gid: u32,
-    mtime: u32,
-    size: u64,
-}
-
-impl BigEndianIo for Common {
-    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let mode = u16::read_be(reader.by_ref())?;
-        let uid = u32::read_be(reader.by_ref())?;
-        let gid = u32::read_be(reader.by_ref())?;
-        let mtime = u32::read_be(reader.by_ref())?;
-        let size = u32::read_be(reader.by_ref())?;
-        let _x1 = u8::read_be(reader.by_ref())?;
-        debug_assert!(_x1 == 1, "x1 {:?}", _x1);
-        Ok(Self {
-            mode,
-            uid,
-            gid,
-            mtime,
-            size: size as u64,
-        })
-    }
-
-    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        self.mode.write_be(writer.by_ref())?;
-        self.uid.write_be(writer.by_ref())?;
-        self.gid.write_be(writer.by_ref())?;
-        self.mtime.write_be(writer.by_ref())?;
-        (self.size as u32).write_be(writer.by_ref())?; // truncate the size
-        1_u8.write_be(writer.by_ref())?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct File {
-    common: Common,
-    checksum: u32,
-}
-
-impl File {
-    pub fn checksum(&self) -> u32 {
-        self.checksum
-    }
-}
-
-impl_common!(File);
-
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct Directory {
-    common: Common,
-}
-
-impl_common!(Directory);
-
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-pub struct Entry {
-    pub entry_type: EntryType,
-}
-
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum Metadata {
     File(File),
     Executable(Executable),
@@ -251,7 +183,7 @@ impl Metadata {
                 let num_arch_again = u32::read_be(reader.by_ref())?;
                 let mut arches = Vec::with_capacity(num_arch_again as usize);
                 for _ in 0..num_arch_again {
-                    arches.push(ExeArch::read_be(reader.by_ref())?);
+                    arches.push(ExecutableArch::read_be(reader.by_ref())?);
                 }
                 Metadata::Executable(Executable {
                     common,
@@ -434,10 +366,25 @@ impl TryFrom<std::fs::Metadata> for Metadata {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct File {
+    common: Common,
+    checksum: u32,
+}
+
+impl File {
+    pub fn checksum(&self) -> u32 {
+        self.checksum
+    }
+}
+
+impl_common!(File);
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Executable {
     common: Common,
     checksum: u32,
-    arches: Vec<ExeArch>,
+    arches: Vec<ExecutableArch>,
 }
 
 impl Executable {
@@ -445,11 +392,11 @@ impl Executable {
         self.checksum
     }
 
-    pub fn arches(&self) -> &[ExeArch] {
+    pub fn arches(&self) -> &[ExecutableArch] {
         &self.arches[..]
     }
 
-    pub fn into_arches(self) -> Vec<ExeArch> {
+    pub fn into_arches(self) -> Vec<ExecutableArch> {
         self.arches
     }
 }
@@ -458,18 +405,11 @@ impl_common!(Executable);
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct Device {
+pub struct Directory {
     common: Common,
-    dev: i32,
 }
 
-impl Device {
-    pub fn rdev(&self) -> i32 {
-        self.dev
-    }
-}
-
-impl_common!(Device);
+impl_common!(Directory);
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -496,16 +436,61 @@ impl Link {
 impl_common!(Link);
 
 #[derive(Debug, Clone)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-pub struct ExeArch {
-    pub cpu_type: u32,
-    pub cpu_sub_type: u32,
-    // If the actual binary size is u64 then this field overflows.
-    pub size: u32,
-    pub checksum: u32,
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct Device {
+    common: Common,
+    dev: i32,
 }
 
-impl BigEndianIo for ExeArch {
+impl Device {
+    pub fn rdev(&self) -> i32 {
+        self.dev
+    }
+}
+
+impl_common!(Device);
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+pub struct Entry {
+    entry_type: EntryType,
+}
+
+impl Entry {
+    pub fn kind(&self) -> EntryType {
+        self.entry_type
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+pub struct ExecutableArch {
+    cpu_type: u32,
+    cpu_sub_type: u32,
+    // If the actual binary size is u64 then this field overflows.
+    size: u32,
+    checksum: u32,
+}
+
+impl ExecutableArch {
+    pub fn cpu_type(&self) -> u32 {
+        self.cpu_type
+    }
+
+    pub fn cpu_sub_type(&self) -> u32 {
+        self.cpu_sub_type
+    }
+
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
+    pub fn checksum(&self) -> u32 {
+        self.checksum
+    }
+}
+
+impl BigEndianIo for ExecutableArch {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let cpu_type = u32::read_be(reader.by_ref())?;
         let cpu_sub_type = u32::read_be(reader.by_ref())?;
@@ -549,6 +534,45 @@ fn get_binary_type(flags: u16) -> BinaryType {
         EXECUTABLE => BinaryType::Executable,
         FAT => BinaryType::Fat,
         _ => BinaryType::Unknown,
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+struct Common {
+    mode: u16,
+    uid: u32,
+    gid: u32,
+    mtime: u32,
+    size: u64,
+}
+
+impl BigEndianIo for Common {
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let mode = u16::read_be(reader.by_ref())?;
+        let uid = u32::read_be(reader.by_ref())?;
+        let gid = u32::read_be(reader.by_ref())?;
+        let mtime = u32::read_be(reader.by_ref())?;
+        let size = u32::read_be(reader.by_ref())?;
+        let _x1 = u8::read_be(reader.by_ref())?;
+        debug_assert!(_x1 == 1, "x1 {:?}", _x1);
+        Ok(Self {
+            mode,
+            uid,
+            gid,
+            mtime,
+            size: size as u64,
+        })
+    }
+
+    fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        self.mode.write_be(writer.by_ref())?;
+        self.uid.write_be(writer.by_ref())?;
+        self.gid.write_be(writer.by_ref())?;
+        self.mtime.write_be(writer.by_ref())?;
+        (self.size as u32).write_be(writer.by_ref())?; // truncate the size
+        1_u8.write_be(writer.by_ref())?;
+        Ok(())
     }
 }
 
@@ -628,7 +652,7 @@ mod tests {
     #[test]
     fn write_read_symmetry() {
         block_io_symmetry_convert::<Metadata32, Metadata>();
-        test_be_io_symmetry::<ExeArch>();
+        test_be_io_symmetry::<ExecutableArch>();
     }
 
     //impl<'a> Arbitrary<'a> for Metadata {
