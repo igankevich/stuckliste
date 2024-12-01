@@ -9,11 +9,8 @@ use bitflags::bitflags;
 use chrono::DateTime;
 use chrono::Local;
 use clap::Parser;
-use stuckliste::receipt::Executable;
 use stuckliste::receipt::FileType;
-use stuckliste::receipt::Link;
 use stuckliste::receipt::Metadata;
-use stuckliste::receipt::MetadataExtra;
 use stuckliste::receipt::Receipt;
 
 #[derive(Parser)]
@@ -112,16 +109,16 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
     use std::fmt::Write;
     let file = File::open(path)?;
     let bom = Receipt::read(file)?;
-    eprintln!("bom {:#?}", bom);
     let paths = bom.paths()?;
     let list = args.list();
     let mut line = String::with_capacity(4096);
     for (path, metadata) in paths.iter() {
         line.clear();
-        let print = match &metadata.extra {
-            MetadataExtra::File { checksum } if list.contains(List::Files) => {
+        let print = match &metadata {
+            Metadata::File(file) if list.contains(List::Files) => {
                 write_common(&mut line, path, metadata, args.paths_only, false)?;
-                write!(&mut line, "\t{}\t{}", metadata.size(), checksum).map_err(Error::other)?;
+                write!(&mut line, "\t{}\t{}", metadata.size(), file.checksum())
+                    .map_err(Error::other)?;
                 if args.print_mtime {
                     let timestamp: DateTime<Local> =
                         metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
@@ -130,17 +127,15 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                 }
                 true
             }
-            MetadataExtra::Executable(Executable { checksum, arches })
-                if list.contains(List::Files) =>
-            {
+            Metadata::Executable(exe) if list.contains(List::Files) => {
                 let mut print = false;
                 write_common(&mut line, path, metadata, args.paths_only, false)?;
                 match args.arch {
                     Some(ref arch) => {
                         let cpu_type = arch_to_cpu_type(arch)?;
-                        for arch in arches.iter() {
-                            if cpu_type == arch.cpu_type {
-                                write!(&mut line, "\t{}\t{}", arch.size, arch.checksum)
+                        for arch in exe.arches().iter() {
+                            if cpu_type == arch.cpu_type() {
+                                write!(&mut line, "\t{}\t{}", arch.size(), arch.checksum())
                                     .map_err(Error::other)?;
                                 print = true;
                                 break;
@@ -148,7 +143,7 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                         }
                     }
                     None => {
-                        write!(&mut line, "\t{}\t{}", metadata.size(), checksum)
+                        write!(&mut line, "\t{}\t{}", metadata.size(), exe.checksum())
                             .map_err(Error::other)?;
                         print = true;
                     }
@@ -161,7 +156,7 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                 }
                 print
             }
-            MetadataExtra::Link(Link { checksum, name }) if list.contains(List::Symlinks) => {
+            Metadata::Link(link) if list.contains(List::Symlinks) => {
                 write_common(
                     &mut line,
                     path,
@@ -173,13 +168,13 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                     &mut line,
                     "\t{}\t{}\t{}",
                     metadata.size(),
-                    checksum,
-                    name.display()
+                    link.checksum(),
+                    link.name().display()
                 )
                 .map_err(Error::other)?;
                 true
             }
-            MetadataExtra::Device(dev) => {
+            Metadata::Device(dev) => {
                 let file_type = FileType::new(metadata.mode())?;
                 let print = match file_type {
                     FileType::BlockDevice if list.contains(List::BlockDevices) => true,
@@ -188,15 +183,15 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                 };
                 if print {
                     write_common(&mut line, path, metadata, args.paths_only, false)?;
-                    write!(&mut line, "\t{}", dev.dev).map_err(Error::other)?;
+                    write!(&mut line, "\t{}", dev.rdev()).map_err(Error::other)?;
                 }
                 print
             }
-            MetadataExtra::PathOnly { .. } => {
+            Metadata::Entry(..) => {
                 write!(&mut line, "{}", path.display()).map_err(Error::other)?;
                 true
             }
-            MetadataExtra::Directory if list.contains(List::Directories) => {
+            Metadata::Directory(..) if list.contains(List::Directories) => {
                 write_common(
                     &mut line,
                     path,

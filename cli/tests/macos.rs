@@ -19,11 +19,10 @@ fn compare_mkbom() {
     );
 }
 
-//#[cfg_attr(
-//    not(target_os = "macos"),
-//    ignore = "Only MacOS's original `mkbom` has `-s` argument"
-//)]
-#[ignore = "TODO"]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "Only MacOS's original `mkbom` has `-s` argument"
+)]
 #[test]
 fn compare_mkbom_s() {
     compare_mkbom_and_lsbom(
@@ -121,8 +120,7 @@ fn compare_mkbom_and_lsbom<F1, F2, F3, F4>(
             String::from_utf8_lossy(&our_output_2.stderr)
         );
         Ok(())
-    })
-    .seed(0x276c6c6800000020);
+    });
 }
 
 fn normalize_output(output: &[u8]) -> String {

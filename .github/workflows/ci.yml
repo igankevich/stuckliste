@@ -38,6 +38,8 @@ jobs:
     env:
       TZ: Europe/Berlin
       RUST_BACKTRACE: 1
+      # run each test for 5 seconds
+      ARBTEST_BUDGET_MS: 5000
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4

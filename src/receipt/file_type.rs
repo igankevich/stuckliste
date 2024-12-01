@@ -55,6 +55,12 @@ impl FileType {
     pub(crate) fn to_mode_bits(self) -> u16 {
         (self as u16) << 12
     }
+
+    #[cfg(test)]
+    pub(crate) fn set(self, mode: u16) -> u16 {
+        const FILE_TYPE_MASK: u16 = 0b1111_0000_0000_0000_u16;
+        (mode & !FILE_TYPE_MASK) | self.to_mode_bits()
+    }
 }
 
 impl TryFrom<std::fs::FileType> for FileType {
@@ -102,6 +108,25 @@ impl TryFrom<u8> for EntryType {
             LINK => Ok(Link),
             DEVICE => Ok(Device),
             _ => Err(ErrorKind::InvalidData.into()),
+        }
+    }
+}
+
+impl TryFrom<std::fs::FileType> for EntryType {
+    type Error = Error;
+    fn try_from(other: std::fs::FileType) -> Result<Self, Self::Error> {
+        use std::os::unix::fs::FileTypeExt;
+        if other.is_dir() {
+            Ok(Self::Directory)
+        } else if other.is_symlink() {
+            Ok(Self::Link)
+        } else if other.is_block_device() || other.is_char_device() {
+            Ok(Self::Device)
+        } else if other.is_file() {
+            Ok(Self::File)
+        } else {
+            // named pipes and sockets are not supported
+            Err(ErrorKind::InvalidData.into())
         }
     }
 }
