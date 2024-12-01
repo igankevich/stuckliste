@@ -237,7 +237,6 @@ impl BlockIo<Context> for PathComponentVec {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
-        eprintln!("write tree {:#?}", self.components);
         let paths = PathComponentTree::new(
             self.iter()
                 .cloned()
@@ -260,7 +259,6 @@ impl BlockIo<Context> for PathComponentVec {
             .into_iter()
             .map(|(k, v)| PathComponent::new(k, v))
             .collect();
-        eprintln!("read tree {:#?}", components);
         Ok(PathComponentVec::new(components))
     }
 }
