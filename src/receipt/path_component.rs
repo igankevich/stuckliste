@@ -3,8 +3,6 @@ use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::OsStr;
-use std::fs::read_link;
-use std::fs::File;
 use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
@@ -20,10 +18,7 @@ use walkdir::WalkDir;
 
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
-use crate::receipt::CrcReader;
-use crate::receipt::Link;
 use crate::receipt::Metadata;
-use crate::receipt::MetadataExtra;
 use crate::receipt::VecTree;
 use crate::BigEndianIo;
 use crate::BlockIo;
@@ -210,36 +205,7 @@ impl PathComponentVec {
             };
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
-            let metadata = std::fs::symlink_metadata(entry.path())?;
-            let mut metadata: Metadata = metadata.try_into()?;
-            if paths_only {
-                metadata.mode = 0;
-                metadata.uid = 0;
-                metadata.gid = 0;
-                metadata.mtime = 0;
-                metadata.size = 0;
-                metadata.extra = MetadataExtra::PathOnly {
-                    entry_type: metadata.file_type().to_entry_type(),
-                };
-            } else {
-                match metadata.extra {
-                    MetadataExtra::File {
-                        ref mut checksum, ..
-                    } => {
-                        let crc_reader = CrcReader::new(File::open(entry.path())?);
-                        *checksum = crc_reader.digest()?;
-                    }
-                    MetadataExtra::Link(Link {
-                        ref mut name,
-                        ref mut checksum,
-                    }) => {
-                        *name = read_link(entry.path())?;
-                        let crc_reader = CrcReader::new(name.as_os_str().as_bytes());
-                        *checksum = crc_reader.digest()?;
-                    }
-                    _ => {}
-                }
-            }
+            let metadata = Metadata::from_path(entry.path(), paths_only)?;
             let parent = match dirname {
                 Some(d) => components.get(d).map(|node| node.seq_no).unwrap_or(0),
                 None => 0,
@@ -271,7 +237,6 @@ impl BlockIo<Context> for PathComponentVec {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
-        eprintln!("write tree {:#?}", self.components);
         let paths = PathComponentTree::new(
             self.iter()
                 .cloned()
@@ -294,7 +259,6 @@ impl BlockIo<Context> for PathComponentVec {
             .into_iter()
             .map(|(k, v)| PathComponent::new(k, v))
             .collect();
-        eprintln!("read tree {:#?}", components);
         Ok(PathComponentVec::new(components))
     }
 }

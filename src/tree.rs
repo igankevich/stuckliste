@@ -199,7 +199,6 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 continue;
             }
             let node = RawTreeNode::read_be(blocks.slice(node, file)?)?;
-            eprintln!("tree node {:?}", node);
             if node.is_data {
                 // data node
                 for (key, value) in node.entries.into_iter() {
