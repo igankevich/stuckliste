@@ -148,4 +148,12 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn bom_read() {
+        let bom = Receipt::read(std::fs::File::open("our.bom").unwrap()).unwrap();
+        eprintln!("our bom {:#?}", bom);
+        let bom = Receipt::read(std::fs::File::open("their.bom").unwrap()).unwrap();
+        eprintln!("their bom {:#?}", bom);
+    }
 }

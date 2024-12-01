@@ -213,14 +213,14 @@ impl PathComponentVec {
             let metadata = std::fs::symlink_metadata(entry.path())?;
             let mut metadata: Metadata = metadata.try_into()?;
             if paths_only {
+                metadata.extra = MetadataExtra::PathOnly {
+                    entry_type: metadata.file_type().to_entry_type(),
+                };
                 metadata.mode = 0;
                 metadata.uid = 0;
                 metadata.gid = 0;
                 metadata.mtime = 0;
                 metadata.size = 0;
-                metadata.extra = MetadataExtra::PathOnly {
-                    entry_type: metadata.file_type().to_entry_type(),
-                };
             } else {
                 match metadata.extra {
                     MetadataExtra::File {
