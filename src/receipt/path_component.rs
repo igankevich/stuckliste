@@ -254,11 +254,21 @@ impl BlockIo<Context> for PathComponentVec {
         context: &mut Context,
     ) -> Result<Self, Error> {
         let tree = PathComponentTree::read_block(i, file, blocks, context)?;
-        let components: Vec<_> = tree
+        let mut components: Vec<_> = tree
             .into_inner()
             .into_iter()
             .map(|(k, v)| PathComponent::new(k, v))
             .collect();
+        components.sort_unstable_by(|a, b| a.seq_no.cmp(&b.seq_no));
+        #[cfg(debug_assertions)]
+        for (i, comp) in components.iter().enumerate() {
+            debug_assert!(
+                comp.seq_no as usize == i + 1,
+                "expected seq. no. = {}, actual seq. no. = {}",
+                i + 1,
+                comp.seq_no
+            );
+        }
         Ok(PathComponentVec::new(components))
     }
 }
