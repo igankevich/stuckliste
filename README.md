@@ -57,7 +57,7 @@ fn create_receipt() -> Result<(), Error> {
 fn read_receipt() -> Result<(), Error> {
     let file = File::open("/tmp/receipt.bom")?;
     let receipt = Receipt::read(file)?;
-    for (path, metadata) in receipt.paths()?.into_iter() {
+    for (path, metadata) in receipt.entries()?.into_iter() {
         println!("{:?}: {:?}", path, metadata);
     }
     Ok(())

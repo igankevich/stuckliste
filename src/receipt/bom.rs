@@ -28,7 +28,7 @@ pub struct Receipt {
 
 impl Receipt {
     // TODO entries
-    pub fn paths(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
+    pub fn entries(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
         self.tree.to_paths()
     }
 
