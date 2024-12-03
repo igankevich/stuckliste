@@ -20,24 +20,48 @@ use crate::Blocks;
 use crate::Bom;
 use crate::NamedBlocks;
 
+pub struct ReceiptBuilder {
+    paths_only: bool,
+}
+
+impl ReceiptBuilder {
+    /// Create receipt builder with the default parameters.
+    pub fn new() -> Self {
+        Self { paths_only: false }
+    }
+
+    /// Do not include metadata in the receipt, include only file paths.
+    pub fn paths_only(mut self, value: bool) -> Self {
+        self.paths_only = value;
+        self
+    }
+
+    /// Create a receipt using the provided parameters.
+    pub fn create<P: AsRef<Path>>(self, directory: P) -> Result<Receipt, Error> {
+        let entries = PathComponentVec::from_directory(directory, self.paths_only)?;
+        Ok(Receipt { entries })
+    }
+}
+
+impl Default for ReceiptBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Receipt {
-    tree: PathComponentVec,
+    entries: PathComponentVec,
 }
 
 impl Receipt {
-    // TODO entries
+    /// Get paths and the corresponding metadata.
     pub fn entries(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
-        self.tree.to_paths()
+        self.entries.to_paths()
     }
 
-    // TODO ReceiptBuilder
-    pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
-        let tree = PathComponentVec::from_directory(directory, paths_only)?;
-        Ok(Self { tree })
-    }
-
+    /// Write receipt to `writer` in bill-of-materials (BOM) format.
     pub fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
         // skip the header
         writer.seek(SeekFrom::Start(Bom::LEN as u64))?;
@@ -58,7 +82,7 @@ impl Receipt {
         // paths
         {
             let i = self
-                .tree
+                .entries
                 .write_block(writer.by_ref(), &mut blocks, &mut context)?;
             named_blocks.insert(PATHS.into(), i);
         };
@@ -70,7 +94,7 @@ impl Receipt {
         }
         // bom info
         {
-            let bom_info = BomInfo::new(&self.tree);
+            let bom_info = BomInfo::new(&self.entries);
             let i = blocks.append(writer.by_ref(), |writer| bom_info.write_be(writer))?;
             named_blocks.insert(BOM_INFO.into(), i);
         }
@@ -83,6 +107,7 @@ impl Receipt {
         Ok(())
     }
 
+    /// Read a receipt from `reader` using bill-of-materials (BOM) format.
     pub fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut file = Vec::new();
         reader.read_to_end(&mut file)?;
@@ -109,25 +134,27 @@ impl Receipt {
         let i = named_blocks
             .remove(PATHS)
             .ok_or_else(|| Error::other(format!("`{:?}` block not found", PATHS)))?;
-        let tree = PathComponentVec::read_block(i, &file, &mut blocks, &mut context)?;
+        let entries = PathComponentVec::read_block(i, &file, &mut blocks, &mut context)?;
         debug_assert!(named_blocks.is_empty(), "named blocks {:?}", named_blocks);
-        Ok(Self { tree })
+        Ok(Self { entries })
     }
 }
 
+/// Virtual paths named block.
+///
 /// Virtual paths (i.e. paths defined with regular expressions).
 pub const V_INDEX: &CStr = c"VIndex";
 
-/// Hard links.
+/// Hard links named block.
 pub const HL_INDEX: &CStr = c"HLIndex";
 
-/// 64-bit file sizes.
+/// 64-bit file sizes named block.
 pub const SIZE_64: &CStr = c"Size64";
 
-/// Per-architecture file statistics.
+/// Per-architecture file statistics named block,
 pub const BOM_INFO: &CStr = c"BomInfo";
 
-/// File path components tree.
+/// File path components tree named block.
 pub const PATHS: &CStr = c"Paths";
 
 #[cfg(test)]

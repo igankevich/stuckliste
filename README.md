@@ -16,7 +16,7 @@ These files are generic storage container for various type of information
 with the most common type being _receipts_ —
 files that contains a list of all files and directories owned by a package and
 that are usually stored under `/Library/Receipts`.
-`stuckliste` library is fuzz-tested agains MacOS's `mkbom` and `lsbom` utilities ensuring that 
+The library is fuzz-tested against MacOS's `mkbom` and `lsbom` utilities ensuring that 
 it produces structurely the same output.
 
 
@@ -45,11 +45,11 @@ lsbom /tmp/receipt.bom
 ```rust
 use std::fs::File;
 use std::io::Error;
-use stuckliste::receipt::Receipt;
+use stuckliste::receipt::{Receipt, ReceiptBuilder};
 
 fn create_receipt() -> Result<(), Error> {
     let file = File::create("/tmp/receipt.bom")?;
-    let receipt = Receipt::from_directory("/tmp", false)?;
+    let receipt = ReceiptBuilder::new().create("/tmp")?;
     receipt.write(file)?;
     Ok(())
 }
@@ -66,7 +66,7 @@ fn read_receipt() -> Result<(), Error> {
 
 ## References
 
-This work is based on the reverse-engineering effort done by other people.
+This work is based on the following reverse-engineering efforts.
 - [Bomutils](https://github.com/hogliux/bomutils)
 - [Darling](https://github.com/darlinghq/darling-installer)
 - [Bom](https://github.com/iineva/bom)
