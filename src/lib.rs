@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 mod block_io;
 mod blocks;
 mod bom;

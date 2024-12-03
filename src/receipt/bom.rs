@@ -27,10 +27,12 @@ pub struct Receipt {
 }
 
 impl Receipt {
+    // TODO entries
     pub fn paths(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
         self.tree.to_paths()
     }
 
+    // TODO ReceiptBuilder
     pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
         let tree = PathComponentVec::from_directory(directory, paths_only)?;
         Ok(Self { tree })
