@@ -64,6 +64,11 @@ fn read_receipt() -> Result<(), Error> {
 }
 ```
 
+## BOM reference
+
+The BOM file structure is explained in a separate
+[document](https://github.com/igankevich/stuckliste/tree/master/docs/bom-file-format-reference.md).
+
 ## References
 
 This work is based on the following reverse-engineering efforts.

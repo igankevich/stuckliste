@@ -1,4 +1,6 @@
 #![doc = include_str!("../README.md")]
+// TODO
+//#![doc = include_str!("../docs/bom-file-format-reference.md")]
 
 mod block_io;
 mod blocks;
