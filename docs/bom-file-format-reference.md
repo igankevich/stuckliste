@@ -11,6 +11,9 @@ The header includes magic bytes and block specification (offset and size) for re
 special blocks that store information on regular and named blocks respectively.
 Usually these special blocks are located at the end of the file to simplify updates.
 
+The unsigned integers in the files are stored in big-endian order,
+strings are stored as null-terminated C-strings, and byte arrays are stored as is.
+
 The following tables summarize the internal structure of the aforementioned entities.
 
 ### <a name="header"></a>File header
@@ -32,11 +35,13 @@ The following tables summarize the internal structure of the aforementioned enti
 
 ### <a name="regular-blocks"></a>Regular blocks
 
+The first block is always null, i.e. has zero offset and zero size to be able to use block index 0 as a "null" value. This block is nevertheless included in `num_occupied_blocks`.
+
 | Field | Type | Explanation |
 |------------|------|-------------|
 | `num_occupied_blocks` | `u32` | No. of occupied regular blocks, i.e. blocks with non-zero length that store some other entity. |
-| `occupied_block[0]` | [`Block`](#block) | First occupied block. |
-| `occupied_block[1]` | [`Block`](#block) | Second occupied block. |
+| `occupied_block[0]` | [`Block`](#block) | Null block. |
+| `occupied_block[1]` | [`Block`](#block) | First occupied block. |
 | ... | | |
 | `occupied_block[num_occupied_blocks-1]` | [`Block`](#block) | Last occupied block. |
 | `num_free_blocks` | `u32` | No. of free regular blocks, i.e. blocks with zero length that can be used to store new entities on file update. |
@@ -70,6 +75,15 @@ There are _data nodes_ that store key/value block indices and
 _meta nodes_ that store block indices that point to data nodes.
 Probably such a hierarchical structure was the reason for calling them _trees_.
 
+The notion of keys and values is blurred in the trees.
+Some trees have all keys point to zero-length blocks, others have duplicate keys.
+Logically both keys and values might be used to store a unique key.
+
+Meta node is not required if the tree fits into one data node page.
+Given that the block size of the tree can be any value,
+the meta nodes can be omitted completely.
+Probably meta nodes and data nodes were used as an efficient way of updating the tree in-place.
+
 The following tables summarize the internal structure of the trees.
 
 ### <a name="tree"></a>Tree
@@ -87,7 +101,7 @@ The following tables summarize the internal structure of the trees.
 
 | Field | Type | Explanation |
 |------------|------|-------|
-| `flags` | `u16` | Equals 1 if it is a data node, 0 otherwise. | 1 |
+| `flags` | `u16` | Equal 1 if it is a data node, 0 otherwise. | 1 |
 | `num_entries` | `u16` | No. of entries in this particular tree node. |
 | `next` | `u32` | Block index of the next data node. |
 | `prev` | `u32` | Block index of the previous data node. |
@@ -105,7 +119,7 @@ It is unclear how the values are used.
 
 | Field | Type | Explanation |
 |------------|------|-------|
-| `flags` | `u16` | Equals 1 if it is a data node, 0 otherwise. | 0 |
+| `flags` | `u16` | Equal 1 if it is a data node, 0 otherwise. | 0 |
 | `num_entries` | `u16` | No. of entries in this particular tree node. |
 | `next` | `u32` | Block index of the next meta node. |
 | `prev` | `u32` | Block index of the previous meta node. |
@@ -114,3 +128,20 @@ It is unclear how the values are used.
 | ... | | |
 | `key[num_entries-1]` | `u32` | Block index of the last entry's key. |
 | `value[num_entries-1]` | `u32` | Block index of the last entry's value. |
+
+
+## BOM-based formats
+
+BOM file format is used as a base for other application-specific formats.
+The most common among them are _receipt_ and _CAR_ formats.
+There are probably others, and it is easy to create your own custom format based on BOM.
+
+Receipt files store file system paths' metadata of installed packages
+and are usually found in `/Library/Receipts` directory.
+This is the most common format: usually when people refer to BOM file they actually mean receipt files.
+This format is explained in a separate [document](./receipt-file-format-reference.md).
+
+Compiled asset catalog (CAR) files store application's asset information.
+This format is documented in the following blog posts:
+- [Reverse engineering the .car file format (compiled Asset Catalogs)](https://blog.timac.org/2018/1018-reverse-engineering-the-car-file-format/)
+- [QuickLook plugin to visualize .car files (compiled Asset Catalogs)](https://blog.timac.org/2018/1112-quicklook-plugin-to-visualize-car-files/)
