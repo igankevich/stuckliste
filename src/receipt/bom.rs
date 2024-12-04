@@ -114,12 +114,14 @@ impl Receipt {
         let header = Bom::read(&file[..])?;
         let mut blocks = header.blocks;
         let mut named_blocks = header.named_blocks;
+        //eprintln!("named blocks {:#?}", named_blocks);
         if let Some(index) = named_blocks.remove(BOM_INFO) {
             let _bom_info = BomInfo::read_be(blocks.slice(index, &file)?)?;
         }
         let mut context = Context::new();
         if let Some(index) = named_blocks.remove(V_INDEX) {
             let _vindex = VirtualPathTree::read_block(index, &file, &mut blocks, &mut context)?;
+            eprintln!("vindex {:#?}", _vindex);
         }
         // block id -> file size
         if let Some(index) = named_blocks.remove(SIZE_64) {

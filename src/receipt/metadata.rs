@@ -210,6 +210,7 @@ impl Metadata {
             }
             FileType::Symlink => {
                 let checksum = u32::read_be(reader.by_ref())?;
+                // TODO rename name to target
                 let name_len = u32::read_be(reader.by_ref())?;
                 debug_assert!(
                     name_len == 0 || file_type == FileType::Symlink,

@@ -57,12 +57,12 @@ Block index here and everywhere else means the index in the list of [regular blo
 | Field | Type | Explanation |
 |------------|------|-------------|
 | `num_named_blocks` | `u32` | No. of named blocks. |
-| `name[0]` | `CStr` | Null-terminated first block name. |
+| `name[0]` | `CStr` | Nul-terminated first block name. |
 | `index[0]` | `u32` | First block index. |
-| `name[1]` | `CStr` | Null-terminated second block name. |
+| `name[1]` | `CStr` | Nul-terminated second block name. |
 | `index[1]` | `u32` | Second block index. |
 | ... | | |
-| `name[num_named_blocks-1]` | `CStr` | Null-terminated last block name. |
+| `name[num_named_blocks-1]` | `CStr` | Nul-terminated last block name. |
 | `index[num_named_blocks-1]` | `u32` | Last block index. |
 
 
