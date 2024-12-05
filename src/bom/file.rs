@@ -1,3 +1,5 @@
+use std::ffi::CStr;
+use std::ffi::CString;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Seek;
@@ -6,6 +8,7 @@ use std::io::Write;
 
 use crate::BigEndianIo;
 use crate::Block;
+use crate::BlockIo;
 use crate::Blocks;
 use crate::NamedBlocks;
 
@@ -13,10 +16,15 @@ use crate::NamedBlocks;
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Bom {
     /// Regular blocks. Addressed by an index.
-    pub blocks: Blocks,
+    blocks: Blocks,
     /// Named blocks. Addressed by a well-known name.
-    pub named_blocks: NamedBlocks,
-    // TODO hide the fields
+    named_blocks: NamedBlocks,
+}
+
+impl Default for Bom {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Bom {
@@ -24,6 +32,56 @@ impl Bom {
 
     /// Bom length with padding.
     pub(crate) const LEN: usize = 512;
+
+    pub fn new() -> Self {
+        Self {
+            blocks: Blocks::new(),
+            named_blocks: NamedBlocks::new(),
+        }
+    }
+
+    pub fn write_named<N, W, C, T>(
+        &mut self,
+        name: N,
+        writer: W,
+        value: &T,
+        context: &mut C,
+    ) -> Result<(), Error>
+    where
+        N: Into<CString>,
+        W: Write + Seek,
+        T: BlockIo<C>,
+    {
+        let i = value.write_block(writer, &mut self.blocks, context)?;
+        self.named_blocks.insert(name.into(), i);
+        Ok(())
+    }
+
+    pub fn get_named(&self, name: &CStr) -> Option<u32> {
+        self.named_blocks.get(name)
+    }
+
+    pub fn read_named<C, T: BlockIo<C>>(
+        &mut self,
+        name: &CStr,
+        file: &[u8],
+        context: &mut C,
+    ) -> Result<T, Error> {
+        let i = self
+            .named_blocks
+            .get(name)
+            .ok_or_else(|| Error::other(format!("`{:?}` block not found", name)))?;
+        T::read_block(i, file, &mut self.blocks, context)
+    }
+
+    pub fn read_regular<C, T: BlockIo<C>>(
+        &mut self,
+        i: u32,
+        file: &[u8],
+        context: &mut C,
+    ) -> Result<T, Error> {
+        T::read_block(i, file, &mut self.blocks, context)
+    }
 
     pub fn read(file: &[u8]) -> Result<Self, Error> {
         if file.len() < Bom::LEN {
