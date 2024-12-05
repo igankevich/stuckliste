@@ -16,6 +16,7 @@ pub struct Bom {
     pub blocks: Blocks,
     /// Named blocks. Addressed by a well-known name.
     pub named_blocks: NamedBlocks,
+    // TODO hide the fields
 }
 
 impl Bom {
