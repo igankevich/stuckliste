@@ -169,7 +169,7 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                     "\t{}\t{}\t{}",
                     metadata.size(),
                     link.checksum(),
-                    link.name().display()
+                    link.target().display()
                 )
                 .map_err(Error::other)?;
                 true

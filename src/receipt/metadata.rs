@@ -109,12 +109,12 @@ impl Metadata {
                 *checksum = crc_reader.digest()?;
             }
             Metadata::Link(Link {
-                ref mut name,
+                ref mut target,
                 ref mut checksum,
                 ..
             }) => {
-                *name = read_link(path)?;
-                let crc_reader = CrcReader::new(name.as_os_str().as_bytes());
+                *target = read_link(path)?;
+                let crc_reader = CrcReader::new(target.as_os_str().as_bytes());
                 *checksum = crc_reader.digest()?;
             }
             _ => {}
@@ -210,22 +210,21 @@ impl Metadata {
             }
             FileType::Symlink => {
                 let checksum = u32::read_be(reader.by_ref())?;
-                // TODO rename name to target
-                let name_len = u32::read_be(reader.by_ref())?;
+                let target_len = u32::read_be(reader.by_ref())?;
                 debug_assert!(
-                    name_len == 0 || file_type == FileType::Symlink,
-                    "file_type = {:?}, name_len = {}",
+                    target_len == 0 || file_type == FileType::Symlink,
+                    "file_type = {:?}, target_len = {}",
                     file_type,
-                    name_len
+                    target_len
                 );
-                let mut name = vec![0_u8; name_len as usize];
-                reader.read_exact(&mut name[..])?;
-                let name = CString::from_vec_with_nul(name).map_err(Error::other)?;
-                let name = OsStr::from_bytes(name.to_bytes());
+                let mut target = vec![0_u8; target_len as usize];
+                reader.read_exact(&mut target[..])?;
+                let target = CString::from_vec_with_nul(target).map_err(Error::other)?;
+                let target = OsStr::from_bytes(target.to_bytes());
                 Metadata::Link(Link {
                     common,
                     checksum,
-                    name: name.into(),
+                    target: target.into(),
                 })
             }
             FileType::CharDevice | FileType::BlockDevice => {
@@ -275,11 +274,11 @@ impl Metadata {
             Metadata::Link(Link {
                 common,
                 checksum,
-                name,
+                target,
             }) => {
                 common.write_be(writer.by_ref())?;
                 checksum.write_be(writer.by_ref())?;
-                let name_bytes = name.as_os_str().as_bytes();
+                let name_bytes = target.as_os_str().as_bytes();
                 // +1 because of the nul byte
                 ((name_bytes.len() + 1) as u32).write_be(writer.by_ref())?;
                 writer.write_all(name_bytes)?;
@@ -354,7 +353,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
             FileType::Symlink => Metadata::Link(Link {
                 common,
                 checksum: 0,
-                name: Default::default(),
+                target: Default::default(),
             }),
             FileType::CharDevice | FileType::BlockDevice => Metadata::Device(Device {
                 common,
@@ -417,7 +416,7 @@ impl_common!(Directory);
 pub struct Link {
     common: Common,
     checksum: u32,
-    name: PathBuf,
+    target: PathBuf,
 }
 
 impl Link {
@@ -425,12 +424,12 @@ impl Link {
         self.checksum
     }
 
-    pub fn name(&self) -> &Path {
-        &self.name
+    pub fn target(&self) -> &Path {
+        &self.target
     }
 
-    pub fn into_name(self) -> PathBuf {
-        self.name
+    pub fn into_target(self) -> PathBuf {
+        self.target
     }
 }
 
@@ -720,7 +719,7 @@ mod tests {
             Ok(Self {
                 common,
                 checksum: u.arbitrary()?,
-                name: OsStr::from_bytes(u.arbitrary::<CString>()?.to_bytes()).into(),
+                target: OsStr::from_bytes(u.arbitrary::<CString>()?.to_bytes()).into(),
             })
         }
     }
