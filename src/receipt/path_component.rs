@@ -183,6 +183,8 @@ impl PathComponentVec {
         Ok(paths)
     }
 
+    // TODO hard links
+    // TODO fat binaries, ordinary binaries
     pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();

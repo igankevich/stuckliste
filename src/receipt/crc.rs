@@ -32,19 +32,36 @@ impl<R: Read> CrcReader<R> {
         }
         Ok(!self.s)
     }
+
+    fn update(&mut self, buf: &[u8]) {
+        let n = buf.len();
+        for b in buf {
+            self.c = *b as u32;
+            self.s = (self.s << 8) ^ TABLE[((self.s >> 24) ^ self.c) as usize];
+        }
+        self.n += n;
+    }
 }
 
 impl<R: Read> Read for CrcReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         let n = self.reader.read(buf)?;
-        for b in &buf[..n] {
-            self.c = *b as u32;
-            self.s = (self.s << 8) ^ TABLE[((self.s >> 24) ^ self.c) as usize];
-        }
-        self.n += n;
+        self.update(&buf[..n]);
         Ok(n)
     }
-    // TODO other methods
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), Error> {
+        self.reader.read_exact(buf)?;
+        self.update(buf);
+        Ok(())
+    }
+
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Error> {
+        let offset = buf.len();
+        let n = self.reader.read_to_end(buf)?;
+        self.update(&buf[offset..offset + n]);
+        Ok(n)
+    }
 }
 
 const TABLE: [u32; 256] = [
@@ -81,3 +98,42 @@ const TABLE: [u32; 256] = [
     0x89b8fd09, 0x8d79e0be, 0x803ac667, 0x84fbdbd0, 0x9abc8bd5, 0x9e7d9662, 0x933eb0bb, 0x97ffad0c,
     0xafb010b1, 0xab710d06, 0xa6322bdf, 0xa2f33668, 0xbcb4666d, 0xb8757bda, 0xb5365d03, 0xb1f740b4,
 ];
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::process::Command;
+    use std::process::Stdio;
+
+    use arbtest::arbtest;
+
+    use super::*;
+
+    #[test]
+    fn compare_to_cksum() {
+        arbtest(|u| {
+            let input: Vec<u8> = u.arbitrary()?;
+            let mut cksum = Command::new("cksum")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            if let Some(mut stdin) = cksum.stdin.take() {
+                stdin.write_all(&input).unwrap();
+            }
+            // Format: `checksum filesize filename`.
+            let mut output = String::new();
+            cksum
+                .stdout
+                .take()
+                .unwrap()
+                .read_to_string(&mut output)
+                .unwrap();
+            let mut iter = output.split_ascii_whitespace();
+            let expected_checksum: u32 = iter.next().unwrap().parse().unwrap();
+            let actual_checksum = CrcReader::new(&input[..]).digest().unwrap();
+            assert_eq!(expected_checksum, actual_checksum);
+            Ok(())
+        });
+    }
+}
