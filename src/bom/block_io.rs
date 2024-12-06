@@ -8,13 +8,17 @@ use crate::BigEndianRead;
 use crate::BigEndianWrite;
 use crate::Blocks;
 
+/// Read values from BOM blocks.
 pub trait BlockRead<C = ()> {
+    /// Read `Self` from block `i`.
     fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, context: &mut C) -> Result<Self, Error>
     where
         Self: Sized;
 }
 
+/// Read values into BOM blocks.
 pub trait BlockWrite<C = ()> {
+    /// Write `self` to a block and return its index.
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,

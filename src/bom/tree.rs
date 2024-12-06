@@ -8,11 +8,15 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use crate::io::*;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 use crate::BlockRead;
 use crate::BlockWrite;
 use crate::Blocks;
 
+/// `Vec`-based BOM tree representation.
+///
+/// The contents of the tree are key-value pairs with no uniqueness constraint on the key.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct VecTree<K, V, C> {
@@ -23,8 +27,12 @@ pub struct VecTree<K, V, C> {
 }
 
 impl<K, V, C> VecTree<K, V, C> {
+    /// Create a new tree with provided `entries` and `block_len` block size.
+    ///
+    /// The block size is silently made at least `MIN_BLOCK_LEN`
+    /// to ensure that it can hold at least one entry.
     pub fn new(entries: Vec<(K, V)>, block_len: usize) -> Self {
-        let block_len = block_len.clamp(MIN_BLOCK_LEN, MAX_BLOCK_LEN);
+        let block_len = block_len.max(MIN_BLOCK_LEN);
         Self {
             entries,
             block_len,
@@ -32,8 +40,14 @@ impl<K, V, C> VecTree<K, V, C> {
         }
     }
 
+    /// Transform into underlying entries.
     pub fn into_inner(self) -> Vec<(K, V)> {
         self.entries
+    }
+
+    /// Get block size.
+    pub fn block_len(&self) -> usize {
+        self.block_len
     }
 }
 
@@ -354,8 +368,7 @@ const NODE_HEADER_LEN: usize = 2 + 2 + 4 + 4;
 const ENTRY_LEN: usize = 4 + 4;
 
 /// The size of the block that can hold one entry maximum.
-const MIN_BLOCK_LEN: usize = NODE_HEADER_LEN + ENTRY_LEN;
-const MAX_BLOCK_LEN: usize = 4096 * 16;
+pub const MIN_BLOCK_LEN: usize = NODE_HEADER_LEN + ENTRY_LEN;
 
 #[cfg(test)]
 mod tests {
@@ -405,4 +418,6 @@ mod tests {
             })
         }
     }
+
+    const MAX_BLOCK_LEN: usize = 4096 * 16;
 }

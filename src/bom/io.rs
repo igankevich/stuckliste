@@ -2,13 +2,17 @@ use std::io::Error;
 use std::io::Read;
 use std::io::Write;
 
+/// Read binary values in big-endian order.
 pub trait BigEndianRead {
+    /// Read `Self` from `reader` using big-endian byte order.
     fn read_be<R: Read>(reader: R) -> Result<Self, Error>
     where
         Self: Sized;
 }
 
+/// Write binary values in big-endian order.
 pub trait BigEndianWrite {
+    /// Write `self` to `write` using big-endian byte order.
     fn write_be<W: Write>(&self, writer: W) -> Result<(), Error>;
 }
 
