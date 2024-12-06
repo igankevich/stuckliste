@@ -7,7 +7,8 @@ use std::io::Write;
 use crate::receipt::Context;
 use crate::receipt::VecTree;
 use crate::BigEndianIo;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 /// Directory name to regex mapping.
@@ -27,7 +28,7 @@ impl VirtualPathTree {
     }
 }
 
-impl BlockIo<Context> for VirtualPathTree {
+impl BlockRead<Context> for VirtualPathTree {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -52,7 +53,9 @@ impl BlockIo<Context> for VirtualPathTree {
         let tree = VecTree::read_block(i, file, blocks, context)?;
         Ok(Self { tree })
     }
+}
 
+impl BlockWrite<Context> for VirtualPathTree {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,

@@ -19,7 +19,8 @@ use crate::receipt::CrcReader;
 use crate::receipt::EntryType;
 use crate::receipt::FileType;
 use crate::BigEndianIo;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 #[derive(Debug, Clone)]
@@ -298,7 +299,7 @@ impl Metadata {
     }
 }
 
-impl BlockIo<Context> for Metadata {
+impl BlockRead<Context> for Metadata {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -316,7 +317,9 @@ impl BlockIo<Context> for Metadata {
         debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
         Ok(metadata)
     }
+}
 
+impl BlockWrite<Context> for Metadata {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,

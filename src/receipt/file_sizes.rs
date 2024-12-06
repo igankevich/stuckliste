@@ -7,7 +7,8 @@ use std::ops::DerefMut;
 
 use crate::receipt::Context;
 use crate::receipt::VecTree;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 /// Metadata block index to 64-bit file size mapping.
@@ -37,7 +38,7 @@ impl DerefMut for FileSizes64 {
     }
 }
 
-impl BlockIo<Context> for FileSizes64 {
+impl BlockWrite<Context> for FileSizes64 {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -51,7 +52,9 @@ impl BlockIo<Context> for FileSizes64 {
         let i = file_size_tree.write_block(writer.by_ref(), blocks, context)?;
         Ok(i)
     }
+}
 
+impl BlockRead<Context> for FileSizes64 {
     fn read_block(
         i: u32,
         file: &[u8],

@@ -9,7 +9,8 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 use crate::io::*;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 #[derive(Debug)]
@@ -60,7 +61,7 @@ impl<K, V, C> DerefMut for VecTree<K, V, C> {
     }
 }
 
-impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
+impl<C, K: BlockWrite<C>, V: BlockWrite<C>> BlockWrite<C> for VecTree<K, V, C> {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -84,7 +85,6 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 entries: raw_entries,
                 is_data: true,
             };
-
             blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?
             //let raw_entries = vec![(block, last_value_block)];
             //let meta_node = RawTreeNode {
@@ -181,7 +181,9 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
         };
         blocks.append(writer.by_ref(), |writer| tree.write_be(writer))
     }
+}
 
+impl<C, K: BlockRead<C>, V: BlockRead<C>> BlockRead<C> for VecTree<K, V, C> {
     fn read_block(
         i: u32,
         file: &[u8],

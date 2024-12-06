@@ -21,7 +21,8 @@ use crate::receipt::Context;
 use crate::receipt::Metadata;
 use crate::receipt::VecTree;
 use crate::BigEndianIo;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 #[derive(Debug, Clone)]
@@ -32,7 +33,7 @@ pub struct PathComponentKey {
     metadata: Metadata,
 }
 
-impl BlockIo<Context> for PathComponentKey {
+impl BlockWrite<Context> for PathComponentKey {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -49,7 +50,9 @@ impl BlockIo<Context> for PathComponentKey {
         })?;
         Ok(i)
     }
+}
 
+impl BlockRead<Context> for PathComponentKey {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -71,7 +74,7 @@ pub struct PathComponentValue {
     name: CString,
 }
 
-impl BlockIo<Context> for PathComponentValue {
+impl BlockWrite<Context> for PathComponentValue {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -85,7 +88,9 @@ impl BlockIo<Context> for PathComponentValue {
         })?;
         Ok(i)
     }
+}
 
+impl BlockRead<Context> for PathComponentValue {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -232,7 +237,7 @@ impl PathComponentVec {
     }
 }
 
-impl BlockIo<Context> for PathComponentVec {
+impl BlockWrite<Context> for PathComponentVec {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
@@ -248,7 +253,9 @@ impl BlockIo<Context> for PathComponentVec {
         );
         paths.write_block(writer, blocks, context)
     }
+}
 
+impl BlockRead<Context> for PathComponentVec {
     fn read_block(
         i: u32,
         file: &[u8],

@@ -1,3 +1,5 @@
+//! Reading/writing receipt files.
+
 mod bom;
 mod bom_info;
 mod context;

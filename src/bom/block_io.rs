@@ -7,20 +7,22 @@ use std::io::Write;
 use crate::BigEndianIo;
 use crate::Blocks;
 
-pub trait BlockIo<C = ()> {
+pub trait BlockRead<C = ()> {
+    fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, context: &mut C) -> Result<Self, Error>
+    where
+        Self: Sized;
+}
+
+pub trait BlockWrite<C = ()> {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
         blocks: &mut Blocks,
         context: &mut C,
     ) -> Result<u32, Error>;
-
-    fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, context: &mut C) -> Result<Self, Error>
-    where
-        Self: Sized;
 }
 
-impl<T: BigEndianIo, C> BlockIo<C> for T {
+impl<T: BigEndianIo, C> BlockWrite<C> for T {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
@@ -29,7 +31,9 @@ impl<T: BigEndianIo, C> BlockIo<C> for T {
     ) -> Result<u32, Error> {
         blocks.append(writer, |writer| BigEndianIo::write_be(self, writer))
     }
+}
 
+impl<T: BigEndianIo, C> BlockRead<C> for T {
     fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, _context: &mut C) -> Result<Self, Error>
     where
         Self: Sized,
@@ -38,7 +42,7 @@ impl<T: BigEndianIo, C> BlockIo<C> for T {
     }
 }
 
-impl<C> BlockIo<C> for CString {
+impl<C> BlockWrite<C> for CString {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
@@ -47,7 +51,9 @@ impl<C> BlockIo<C> for CString {
     ) -> Result<u32, Error> {
         blocks.append(writer, |writer| writer.write_all(self.to_bytes_with_nul()))
     }
+}
 
+impl<C> BlockRead<C> for CString {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -60,7 +66,7 @@ impl<C> BlockIo<C> for CString {
     }
 }
 
-impl<C, T: BlockIo<C>> BlockIo<C> for Option<T> {
+impl<C, T: BlockWrite<C>> BlockWrite<C> for Option<T> {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -73,7 +79,9 @@ impl<C, T: BlockIo<C>> BlockIo<C> for Option<T> {
         };
         blocks.append(writer, |writer| i.write_be(writer))
     }
+}
 
+impl<C, T: BlockRead<C>> BlockRead<C> for Option<T> {
     fn read_block(
         i: u32,
         file: &[u8],

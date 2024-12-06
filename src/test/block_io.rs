@@ -5,16 +5,19 @@ use arbitrary::Arbitrary;
 use arbtest::arbtest;
 
 use crate::receipt::Context;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
-pub fn block_io_symmetry<T: for<'a> Arbitrary<'a> + Debug + Eq + BlockIo<Context>>() {
+pub fn block_io_symmetry<
+    T: for<'a> Arbitrary<'a> + Debug + Eq + BlockRead<Context> + BlockWrite<Context>,
+>() {
     block_io_symmetry_convert::<T, T>();
 }
 
 pub fn block_io_symmetry_convert<
     X: for<'a> Arbitrary<'a>,
-    T: From<X> + Debug + Eq + BlockIo<Context>,
+    T: From<X> + Debug + Eq + BlockRead<Context> + BlockWrite<Context>,
 >() {
     arbtest(|u| {
         let expected: X = u.arbitrary()?;
@@ -23,11 +26,18 @@ pub fn block_io_symmetry_convert<
     });
 }
 
-pub fn test_block_io_symmetry<T: Debug + Eq + BlockIo<Context>>(expected: T) {
+pub fn test_block_io_symmetry<T: Debug + Eq + BlockRead<Context> + BlockWrite<Context>>(
+    expected: T,
+) {
     test_block_io_symmetry_convert::<T, T>(expected);
 }
 
-pub fn test_block_io_symmetry_convert<X, T: From<X> + Debug + Eq + BlockIo<Context>>(expected: X) {
+pub fn test_block_io_symmetry_convert<
+    X,
+    T: From<X> + Debug + Eq + BlockRead<Context> + BlockWrite<Context>,
+>(
+    expected: X,
+) {
     let mut blocks = Blocks::new();
     let mut context = Context::new();
     let expected: T = expected.into();

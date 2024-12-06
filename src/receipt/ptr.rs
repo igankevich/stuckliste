@@ -4,7 +4,8 @@ use std::io::Write;
 
 use crate::receipt::Context;
 use crate::BigEndianIo;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 #[derive(Debug)]
@@ -21,13 +22,13 @@ impl<T> Ptr<T> {
     }
 }
 
-impl<T: BlockIo<Context>> From<T> for Ptr<T> {
+impl<T> From<T> for Ptr<T> {
     fn from(other: T) -> Ptr<T> {
         Self(other)
     }
 }
 
-impl<T: BlockIo<Context>> BlockIo<Context> for Ptr<T> {
+impl<T: BlockWrite<Context>> BlockWrite<Context> for Ptr<T> {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -37,7 +38,9 @@ impl<T: BlockIo<Context>> BlockIo<Context> for Ptr<T> {
         let i = self.0.write_block(writer.by_ref(), blocks, context)?;
         blocks.append(writer, |writer| i.write_be(writer))
     }
+}
 
+impl<T: BlockRead<Context>> BlockRead<Context> for Ptr<T> {
     fn read_block(
         i: u32,
         file: &[u8],

@@ -8,7 +8,8 @@ use std::io::Write;
 
 use crate::BigEndianIo;
 use crate::Block;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 use crate::NamedBlocks;
 
@@ -60,7 +61,7 @@ impl Bom {
     where
         N: Into<CString>,
         W: Write + Seek,
-        T: BlockIo<C>,
+        T: BlockWrite<C>,
     {
         let i = value.write_block(writer, &mut self.blocks, context)?;
         self.named_blocks.insert(name.into(), i);
@@ -71,7 +72,7 @@ impl Bom {
         self.named_blocks.get(name)
     }
 
-    pub fn read_named<C, T: BlockIo<C>>(
+    pub fn read_named<C, T: BlockRead<C>>(
         &mut self,
         name: &CStr,
         file: &[u8],
@@ -84,7 +85,7 @@ impl Bom {
         T::read_block(i, file, &mut self.blocks, context)
     }
 
-    pub fn read_regular<C, T: BlockIo<C>>(
+    pub fn read_regular<C, T: BlockRead<C>>(
         &mut self,
         i: u32,
         file: &[u8],
