@@ -3,7 +3,8 @@ use std::io::Read;
 use std::io::Write;
 
 use crate::receipt::PathComponentVec;
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 
 /// File paths statistics.
 #[derive(Debug)]
@@ -47,7 +48,7 @@ impl BomInfo {
     }
 }
 
-impl BigEndianIo for BomInfo {
+impl BigEndianRead for BomInfo {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
@@ -64,7 +65,9 @@ impl BigEndianIo for BomInfo {
         }
         Ok(Self { num_paths, entries })
     }
+}
 
+impl BigEndianWrite for BomInfo {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         Self::VERSION.write_be(writer.by_ref())?;
         self.num_paths.write_be(writer.by_ref())?;
@@ -83,7 +86,7 @@ pub(crate) struct BomInfoEntry {
     file_size: u32,
 }
 
-impl BigEndianIo for BomInfoEntry {
+impl BigEndianRead for BomInfoEntry {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let cpu_type = u32::read_be(reader.by_ref())?;
         let _x1 = u32::read_be(reader.by_ref())?;
@@ -96,7 +99,9 @@ impl BigEndianIo for BomInfoEntry {
         debug_assert!(_x1 == DEFAULT_X1 && _x2 == DEFAULT_X2, "entry = {entry:?}");
         Ok(entry)
     }
+}
 
+impl BigEndianWrite for BomInfoEntry {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         self.cpu_type.write_be(writer.by_ref())?;
         DEFAULT_X1.write_be(writer.by_ref())?;

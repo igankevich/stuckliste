@@ -5,7 +5,8 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 
 /// Blocks addressed by a well-known name.
 #[derive(Debug)]
@@ -56,7 +57,7 @@ impl NamedBlocks {
     }
 }
 
-impl BigEndianIo for NamedBlocks {
+impl BigEndianRead for NamedBlocks {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let num_named_blocks = u32::read_be(reader.by_ref())? as usize;
         let mut blocks = Vec::with_capacity(num_named_blocks);
@@ -74,7 +75,9 @@ impl BigEndianIo for NamedBlocks {
         }
         Ok(Self { blocks })
     }
+}
 
+impl BigEndianWrite for NamedBlocks {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let num_named_blocks = self.blocks.len() as u32;
         num_named_blocks.write_be(writer.by_ref())?;

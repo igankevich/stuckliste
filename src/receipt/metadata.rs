@@ -18,7 +18,8 @@ use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::EntryType;
 use crate::receipt::FileType;
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 use crate::BlockRead;
 use crate::BlockWrite;
 use crate::Blocks;
@@ -493,7 +494,7 @@ impl ExecutableArch {
     }
 }
 
-impl BigEndianIo for ExecutableArch {
+impl BigEndianRead for ExecutableArch {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let cpu_type = u32::read_be(reader.by_ref())?;
         let cpu_sub_type = u32::read_be(reader.by_ref())?;
@@ -506,7 +507,9 @@ impl BigEndianIo for ExecutableArch {
             checksum,
         })
     }
+}
 
+impl BigEndianWrite for ExecutableArch {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         self.cpu_type.write_be(writer.by_ref())?;
         self.cpu_sub_type.write_be(writer.by_ref())?;
@@ -550,7 +553,7 @@ struct Common {
     size: u64,
 }
 
-impl BigEndianIo for Common {
+impl BigEndianRead for Common {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mode = u16::read_be(reader.by_ref())?;
         let uid = u32::read_be(reader.by_ref())?;
@@ -567,7 +570,9 @@ impl BigEndianIo for Common {
             size: size as u64,
         })
     }
+}
 
+impl BigEndianWrite for Common {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         self.mode.write_be(writer.by_ref())?;
         self.uid.write_be(writer.by_ref())?;

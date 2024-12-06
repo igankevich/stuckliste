@@ -6,7 +6,8 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
 
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 use crate::Block;
 use crate::BlockRead;
 use crate::BlockWrite;

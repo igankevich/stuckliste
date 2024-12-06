@@ -6,7 +6,8 @@ use std::io::Write;
 
 use crate::receipt::Context;
 use crate::receipt::VecTree;
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 use crate::BlockRead;
 use crate::BlockWrite;
 use crate::Blocks;

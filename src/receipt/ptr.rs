@@ -3,7 +3,8 @@ use std::io::Seek;
 use std::io::Write;
 
 use crate::receipt::Context;
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 use crate::BlockRead;
 use crate::BlockWrite;
 use crate::Blocks;

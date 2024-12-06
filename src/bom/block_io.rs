@@ -4,7 +4,8 @@ use std::io::Error;
 use std::io::Seek;
 use std::io::Write;
 
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 use crate::Blocks;
 
 pub trait BlockRead<C = ()> {
@@ -22,23 +23,23 @@ pub trait BlockWrite<C = ()> {
     ) -> Result<u32, Error>;
 }
 
-impl<T: BigEndianIo, C> BlockWrite<C> for T {
+impl<T: BigEndianWrite, C> BlockWrite<C> for T {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
         blocks: &mut Blocks,
         _context: &mut C,
     ) -> Result<u32, Error> {
-        blocks.append(writer, |writer| BigEndianIo::write_be(self, writer))
+        blocks.append(writer, |writer| BigEndianWrite::write_be(self, writer))
     }
 }
 
-impl<T: BigEndianIo, C> BlockRead<C> for T {
+impl<T: BigEndianRead, C> BlockRead<C> for T {
     fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, _context: &mut C) -> Result<Self, Error>
     where
         Self: Sized,
     {
-        BigEndianIo::read_be(blocks.slice(i, file)?)
+        BigEndianRead::read_be(blocks.slice(i, file)?)
     }
 }
 

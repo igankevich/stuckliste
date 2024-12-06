@@ -3,6 +3,9 @@ use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
 
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
+
 pub struct FatBinary {
     arches: Vec<FatArch>,
 }
@@ -36,18 +39,18 @@ pub struct FatArch {
 
 impl FatArch {
     pub fn read_be<R: Read>(mut reader: R, is_64_bit: bool) -> Result<Self, Error> {
-        let cpu_type = u32_read(reader.by_ref())?;
-        let cpu_sub_type = u32_read(reader.by_ref())?;
+        let cpu_type = u32::read_be(reader.by_ref())?;
+        let cpu_sub_type = u32::read_be(reader.by_ref())?;
         let (offset, size) = if is_64_bit {
-            let offset = u64_read(reader.by_ref())?;
-            let size = u64_read(reader.by_ref())?;
+            let offset = u64::read_be(reader.by_ref())?;
+            let size = u64::read_be(reader.by_ref())?;
             (offset, size)
         } else {
-            let offset = u32_read(reader.by_ref())?;
-            let size = u32_read(reader.by_ref())?;
+            let offset = u32::read_be(reader.by_ref())?;
+            let size = u32::read_be(reader.by_ref())?;
             (offset as u64, size as u64)
         };
-        let align = u32_read(reader.by_ref())?;
+        let align = u32::read_be(reader.by_ref())?;
         Ok(Self {
             cpu_type,
             cpu_sub_type,
@@ -56,20 +59,6 @@ impl FatArch {
             align,
         })
     }
-}
-
-fn u32_read<R: Read>(mut reader: R) -> Result<u32, Error> {
-    let mut data = [0_u8; 4];
-    reader.read_exact(&mut data[..])?;
-    Ok(u32::from_be_bytes([data[0], data[1], data[2], data[3]]))
-}
-
-fn u64_read<R: Read>(mut reader: R) -> Result<u64, Error> {
-    let mut data = [0_u8; 8];
-    reader.read_exact(&mut data[..])?;
-    Ok(u64::from_be_bytes([
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-    ]))
 }
 
 const HEADER_LEN: usize = 8;

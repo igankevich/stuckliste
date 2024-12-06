@@ -3,7 +3,8 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
@@ -131,11 +132,13 @@ impl TryFrom<std::fs::FileType> for EntryType {
     }
 }
 
-impl BigEndianIo for EntryType {
+impl BigEndianRead for EntryType {
     fn read_be<R: Read>(reader: R) -> Result<Self, Error> {
         u8::read_be(reader)?.try_into()
     }
+}
 
+impl BigEndianWrite for EntryType {
     fn write_be<W: Write>(&self, writer: W) -> Result<(), Error> {
         (*self as u8).write_be(writer)
     }

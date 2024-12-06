@@ -242,7 +242,7 @@ impl RawTree {
     const VERSION: u32 = 1;
 }
 
-impl BigEndianIo for RawTree {
+impl BigEndianRead for RawTree {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut magic = [0_u8; 4];
         reader.read_exact(&mut magic[..])?;
@@ -266,7 +266,9 @@ impl BigEndianIo for RawTree {
             num_entries,
         })
     }
+}
 
+impl BigEndianWrite for RawTree {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         writer.write_all(&TREE_MAGIC[..])?;
         Self::VERSION.write_be(writer.by_ref())?;
@@ -287,7 +289,7 @@ struct RawTreeNode {
     is_data: bool,
 }
 
-impl BigEndianIo for RawTreeNode {
+impl BigEndianRead for RawTreeNode {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let is_data = u16::read_be(reader.by_ref())? != 0;
         let num_entries = u16::read_be(reader.by_ref())?;
@@ -306,7 +308,9 @@ impl BigEndianIo for RawTreeNode {
             is_data,
         })
     }
+}
 
+impl BigEndianWrite for RawTreeNode {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let is_data: u16 = if self.is_data { 1 } else { 0 };
         let num_entries: u16 = self
