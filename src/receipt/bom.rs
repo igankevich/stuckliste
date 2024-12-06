@@ -36,10 +36,7 @@ impl ReceiptBuilder {
     /// Create a receipt using the provided parameters.
     pub fn create<P: AsRef<Path>>(self, directory: P) -> Result<Receipt, Error> {
         let entries = PathComponentVec::from_directory(directory, self.paths_only)?;
-        Ok(Receipt {
-            entries,
-            stats: None,
-        })
+        Ok(Receipt { entries })
     }
 }
 
@@ -49,47 +46,10 @@ impl Default for ReceiptBuilder {
     }
 }
 
-/// Receipt read options.
-pub struct ReceiptOptions {
-    stats: bool,
-}
-
-impl ReceiptOptions {
-    /// Get default options.
-    pub fn new() -> Self {
-        Self { stats: false }
-    }
-
-    /// Read `BomInfo` block.
-    pub fn stats(mut self, value: bool) -> Self {
-        self.stats = value;
-        self
-    }
-
-    /// Read a receipt using the provided parameters.
-    pub fn open<P: AsRef<Path>>(self, path: P) -> Result<Receipt, Error> {
-        let file = File::open(path)?;
-        Receipt::do_read(file, self)
-    }
-
-    /// Read a receipt using the provided parameters.
-    pub fn read<R: Read>(self, reader: R) -> Result<Receipt, Error> {
-        Receipt::do_read(reader, self)
-    }
-}
-
-impl Default for ReceiptOptions {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Receipt {
     entries: PathComponentVec,
-    // TODO split into reader/writer??
-    stats: Option<BomInfo>,
 }
 
 impl Receipt {
@@ -98,9 +58,9 @@ impl Receipt {
         self.entries.to_paths()
     }
 
-    /// Get per-architecture file statistics.
-    pub fn stats(&self) -> Option<&BomInfo> {
-        self.stats.as_ref()
+    /// Compute and return per-architecture file statistics.
+    pub fn stats(&self) -> BomInfo {
+        BomInfo::new(&self.entries)
     }
 
     /// Write receipt to `writer` in bill-of-materials (BOM) format.
@@ -139,26 +99,20 @@ impl Receipt {
         Ok(())
     }
 
-    pub fn options() -> ReceiptOptions {
-        Default::default()
+    /// Read a receipt from file under `path`.
+    pub fn open<P: AsRef<Path>>(self, path: P) -> Result<Receipt, Error> {
+        let file = File::open(path)?;
+        Self::read(file)
     }
 
-    /// Read a receipt from `reader` using bill-of-materials (BOM) format.
-    pub fn read<R: Read>(reader: R) -> Result<Self, Error> {
-        Self::do_read(reader, Default::default())
-    }
-
-    fn do_read<R: Read>(mut reader: R, options: ReceiptOptions) -> Result<Self, Error> {
+    /// Read a receipt from `reader`.
+    pub fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut file = Vec::new();
         reader.read_to_end(&mut file)?;
         let mut bom = Bom::read(&file[..])?;
         let mut context = Context::new();
-        let stats: Option<BomInfo> = if options.stats {
-            Some(bom.read_named(Self::BOM_INFO, &file, &mut context)?)
-        } else {
-            None
-        };
-        let _vindex: VirtualPathTree = bom.read_named(Self::V_INDEX, &file, &mut context)?;
+        //let _stats: BomInfo = bom.read_named(Self::BOM_INFO, &file, &mut context)?;
+        //let _vindex: VirtualPathTree = bom.read_named(Self::V_INDEX, &file, &mut context)?;
         if let Some(i) = bom.get_named(Self::SIZE_64) {
             let file_size_64: FileSizes64 = bom.read_regular(i, &file, &mut context)?;
             context.file_size_64 = file_size_64;
@@ -168,7 +122,7 @@ impl Receipt {
             context.hard_links = hard_links;
         }
         let entries: PathComponentVec = bom.read_named(Self::PATHS, &file, &mut context)?;
-        Ok(Self { entries, stats })
+        Ok(Self { entries })
     }
 
     /// Virtual paths named block.
@@ -204,9 +158,9 @@ mod tests {
             let mut writer = Cursor::new(Vec::new());
             expected.write(&mut writer).unwrap();
             let bytes = writer.into_inner();
-            let actual = Receipt::options().stats(true).read(&bytes[..]).unwrap();
-            // TODO stats?
-            assert_eq!(expected.entries, actual.entries);
+            let actual = Receipt::read(&bytes[..]).unwrap();
+            assert_eq!(expected, actual);
+            assert_eq!(expected.stats(), actual.stats());
             Ok(())
         });
     }

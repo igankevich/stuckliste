@@ -40,6 +40,16 @@ impl Bom {
         }
     }
 
+    /// Get all regular blocks.
+    pub fn blocks(&self) -> &Blocks {
+        &self.blocks
+    }
+
+    /// Get all named blocks.
+    pub fn named_blocks(&self) -> &NamedBlocks {
+        &self.named_blocks
+    }
+
     pub fn write_named<N, W, C, T>(
         &mut self,
         name: N,
