@@ -74,7 +74,7 @@ jobs:
   publish-binaries:
     needs: [ubuntu, macos]
     permissions:
-      content: write
+      contents: write
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/igankevich/stuckliste-ci:latest
