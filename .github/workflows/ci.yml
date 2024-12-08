@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4
+      - name: Init
+        run: cijail ./ci/init.sh
       - name: Lint
         run: cijail ./ci/lint.sh
       - name: Test
@@ -78,6 +80,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4
+      - name: Init
+        run: ./ci/init.sh
       - name: Build static binaries
         run: ./ci/build.sh
       - name: Create release
