@@ -89,7 +89,7 @@ impl Receipt {
         bom.write_named(
             Self::SIZE_64,
             writer.by_ref(),
-            &std::mem::take(&mut context.file_size_64),
+            &std::mem::take(&mut context.file_sizes),
             &mut context,
         )?;
         bom.write_named(
@@ -118,8 +118,8 @@ impl Receipt {
         //let _stats: BomInfo = bom.read_named(Self::BOM_INFO, &file, &mut context)?;
         //let _vindex: VirtualPathTree = bom.read_named(Self::V_INDEX, &file, &mut context)?;
         if let Some(i) = bom.get_named(Self::SIZE_64) {
-            let file_size_64: FileSizes64 = bom.read_regular(i, &file, &mut context)?;
-            context.file_size_64 = file_size_64;
+            let file_sizes: FileSizes64 = bom.read_regular(i, &file, &mut context)?;
+            context.file_sizes = file_sizes;
         }
         if let Some(i) = bom.get_named(Self::HL_INDEX) {
             let hard_links: HardLinks = bom.read_regular(i, &file, &mut context)?;

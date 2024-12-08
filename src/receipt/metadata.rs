@@ -378,7 +378,7 @@ impl BlockRead<Context> for Metadata {
         let block_len = reader.len();
         let mut cursor = Cursor::new(reader);
         let mut metadata = Self::read(cursor.by_ref())?;
-        if let Some(size) = context.file_size_64.get(&i) {
+        if let Some(size) = context.file_sizes.get(&i) {
             metadata.set_size(*size);
         }
         let unread_bytes = block_len - reader.len();
@@ -397,7 +397,7 @@ impl BlockWrite<Context> for Metadata {
         let i = blocks.append(writer.by_ref(), |writer| self.write(writer))?;
         let file_size = self.size();
         if file_size > u32::MAX as u64 {
-            context.file_size_64.insert(i, file_size);
+            context.file_sizes.insert(i, file_size);
         }
         Ok(i)
     }
@@ -771,16 +771,6 @@ mod tests {
         block_io_symmetry_convert::<Metadata32, Metadata>();
         test_be_io_symmetry::<ExecutableArch>();
     }
-
-    //impl<'a> Arbitrary<'a> for Metadata {
-    //    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-    //        let mut metadata: Metadata = u.arbitrary()?;
-    //        // make file mode correspond to entry type
-    //        let file_type = to_file_type(metadata.entry_type());
-    //        metadata.set_mode(u.int_in_range(0_u16..=0o7777_u16)? | file_type.to_mode_bits());
-    //        Ok(metadata)
-    //    }
-    //}
 
     impl<'a> Arbitrary<'a> for File {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {

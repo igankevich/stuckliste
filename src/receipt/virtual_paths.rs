@@ -40,6 +40,7 @@ impl BlockRead<Context> for VirtualPathTree {
         let mut reader = blocks.slice(i, file)?;
         let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
+            // TODO better errors
             return Err(Error::other(format!(
                 "unsupported VirtualPathTree version: {}",
                 version

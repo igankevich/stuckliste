@@ -15,7 +15,7 @@ use crate::Blocks;
 
 /// Metadata block index to 64-bit file size mapping.
 #[derive(Debug, Default)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct HardLinks(HashMap<u32, Vec<CString>>);
 
 impl HardLinks {
@@ -50,7 +50,7 @@ impl BlockWrite<Context> for HardLinks {
         context: &mut Context,
     ) -> Result<u32, Error> {
         let mut hard_links = Vec::with_capacity(self.0.len());
-        for (block, paths) in self.0.iter() {
+        for (block, paths) in self.0.iter().filter(|(_, paths)| paths.len() > 1) {
             let paths_tree = PathsTree::new(
                 paths.iter().map(|path| ((), path.clone())).collect(),
                 Self::INNER_BLOCK_LEN,
@@ -79,6 +79,7 @@ impl BlockRead<Context> for HardLinks {
                 names.push(name);
             }
         }
+        hard_links.retain(|_, paths| paths.len() > 1);
         Ok(Self(hard_links))
     }
 }
@@ -90,11 +91,22 @@ type PathsTree = VecTree<(), CString>;
 #[cfg(test)]
 mod tests {
 
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
+
     use super::*;
     use crate::test::block_io_symmetry;
 
     #[test]
     fn write_read_symmetry() {
         block_io_symmetry::<HardLinks>();
+    }
+
+    impl<'a> Arbitrary<'a> for HardLinks {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut hard_links: HashMap<u32, Vec<CString>> = u.arbitrary()?;
+            hard_links.retain(|_, paths| paths.len() > 1);
+            Ok(Self(hard_links))
+        }
     }
 }

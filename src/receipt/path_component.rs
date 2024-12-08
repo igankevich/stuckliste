@@ -48,6 +48,7 @@ impl BlockWrite<Context> for PathComponentKey {
             metadata_index.write_be(writer.by_ref())?;
             Ok(())
         })?;
+        context.current_metadata_block_index = Some(i);
         Ok(i)
     }
 }
@@ -79,13 +80,20 @@ impl BlockWrite<Context> for PathComponentValue {
         &self,
         mut writer: W,
         blocks: &mut Blocks,
-        _context: &mut Context,
+        context: &mut Context,
     ) -> Result<u32, Error> {
         let i = blocks.append(writer.by_ref(), |writer| {
             self.parent.write_be(writer.by_ref())?;
             writer.write_all(self.name.to_bytes_with_nul())?;
             Ok(())
         })?;
+        if let Some(j) = context.current_metadata_block_index.take() {
+            context
+                .hard_links
+                .entry(j)
+                .or_default()
+                .push(self.name.clone());
+        }
         Ok(i)
     }
 }
@@ -193,7 +201,6 @@ impl PathComponentVec {
         Ok(paths)
     }
 
-    // TODO hard links
     /// Create a vector by recursively scanning the provided directory.
     pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
         let directory = directory.as_ref();
