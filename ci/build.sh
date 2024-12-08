@@ -8,6 +8,7 @@
 #fi
 
 set -e
+root="$(pwd)"
 target=x86_64-unknown-linux-musl
 cargo build \
     --quiet \
@@ -21,7 +22,6 @@ mkdir -p "$release_dir"/"$target"
 for filename in lsbom mkbom; do
     cp -vn target/"$target"/release/"$filename" "$release_dir"/"$target"/
 done
-cd release
+cd "$release_dir"
 find . -type f -print0 >"$workdir"/files
-tar -czvf ../stuckliste-"$version".tar.gz \
-    --null --files-from="$workdir"/files
+tar -czvf "$root"/stuckliste-"$version".tar.gz --null --files-from="$workdir"/files
