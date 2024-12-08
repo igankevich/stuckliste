@@ -29,4 +29,4 @@ expect_used = "deny"
 panic = "deny"
 
 [lints.rust]
-missing_docs = "warn"
+#missing_docs = "warn"

@@ -17,7 +17,9 @@ use crate::receipt::BomInfo;
 use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::EntryType;
+use crate::receipt::FatBinary;
 use crate::receipt::FileType;
+use crate::receipt::MachObject;
 use crate::BigEndianRead;
 use crate::BigEndianWrite;
 use crate::BlockRead;
@@ -52,9 +54,10 @@ pub enum Metadata {
 }
 
 impl Metadata {
-    /// Get file type from file mode.
+    /// Get the file type from file mode.
+    ///
+    /// Unsupported file types are coerced to [`FileType::Regular].
     pub fn file_type(&self) -> FileType {
-        // TODO error ???
         FileType::new(self.mode()).unwrap_or(FileType::Regular)
     }
 
@@ -122,7 +125,7 @@ impl Metadata {
     }
 
     /// Create metadata from the provided file path.
-    pub fn from_path(path: &Path, path_only: bool) -> Result<Self, Error> {
+    pub fn new(path: &Path, path_only: bool) -> Result<Self, Error> {
         let metadata = std::fs::symlink_metadata(path)?;
         if path_only {
             return Ok(Self::Entry(Entry {
@@ -147,6 +150,42 @@ impl Metadata {
                 *checksum = crc_reader.digest()?;
             }
             _ => {}
+        }
+        if let Metadata::File(File {
+            ref common,
+            ref checksum,
+            ..
+        }) = metadata
+        {
+            let mut file = std::fs::File::open(path)?;
+            let arches = match FatBinary::read_be(&mut file) {
+                Ok(fat) => fat.to_executable_arches(file)?,
+                Err(_) => {
+                    file.rewind()?;
+                    match MachObject::read_be(file) {
+                        Ok(mach) => {
+                            let mut arch: ExecutableArch = mach.into();
+                            // This value overflows for files larger than 4 GiB.
+                            arch.size = common.size as u32;
+                            arch.checksum = *checksum;
+                            vec![arch]
+                        }
+                        Err(_) => Default::default(),
+                    }
+                }
+            };
+            if !arches.is_empty() {
+                let file = match metadata {
+                    Metadata::File(file) => file,
+                    // we matched on File above
+                    _ => unreachable!(),
+                };
+                metadata = Metadata::Executable(Executable {
+                    common: file.common,
+                    checksum: file.checksum,
+                    arches,
+                });
+            }
         }
         Ok(metadata)
     }
@@ -522,11 +561,11 @@ impl Entry {
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct ExecutableArch {
-    cpu_type: u32,
-    cpu_sub_type: u32,
+    pub(crate) cpu_type: u32,
+    pub(crate) cpu_sub_type: u32,
     // If the actual binary size is u64 then this field overflows.
-    size: u32,
-    checksum: u32,
+    pub(crate) size: u32,
+    pub(crate) checksum: u32,
 }
 
 impl ExecutableArch {

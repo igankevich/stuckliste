@@ -194,7 +194,6 @@ impl PathComponentVec {
     }
 
     // TODO hard links
-    // TODO fat binaries, ordinary binaries
     /// Create a vector by recursively scanning the provided directory.
     pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
         let directory = directory.as_ref();
@@ -208,9 +207,6 @@ impl PathComponentVec {
                 .strip_prefix(directory)
                 .map_err(Error::other)?
                 .normalize();
-            //if entry_path == Path::new("") {
-            //    continue;
-            //}
             let relative_path = if entry_path == Path::new("") {
                 Path::new(".").to_path_buf()
             } else {
@@ -218,7 +214,7 @@ impl PathComponentVec {
             };
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
-            let metadata = Metadata::from_path(entry.path(), paths_only)?;
+            let metadata = Metadata::new(entry.path(), paths_only)?;
             let parent = match dirname {
                 Some(d) => components.get(d).map(|node| node.seq_no).unwrap_or(0),
                 None => 0,
