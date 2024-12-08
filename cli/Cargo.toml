@@ -6,11 +6,11 @@ license = "GPL-3.0"
 homepage = "https://github.com/igankevich/stuckliste"
 repository = "https://github.com/igankevich/stuckliste"
 documentation = "https://docs.rs/stuckliste-cli"
-readme = "README.md"
+readme = "../README.md"
 description = "A command-line utility for reading and writing MacOS bill-of-materials (BOM) files."
 keywords = ["bom", "bill-of-materials", "mkbom", "lsbom"]
 categories = ["encoding", "filesystem", "command-line-utilities"]
-include = ["**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+include = ["**/*.rs", "Cargo.toml", "../README.md", "LICENSE"]
 
 [dependencies]
 bitflags = "2.6.0"
