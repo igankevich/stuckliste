@@ -36,7 +36,7 @@ impl ReceiptBuilder {
 
     /// Create a receipt using the provided parameters.
     pub fn create<P: AsRef<Path>>(self, directory: P) -> Result<Receipt, Error> {
-        let entries = PathComponentVec::from_directory(directory, self.paths_only)?;
+        let entries = PathComponentVec::from_dir(directory, self.paths_only)?;
         Ok(Receipt { entries })
     }
 }

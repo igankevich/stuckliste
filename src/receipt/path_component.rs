@@ -203,7 +203,7 @@ impl PathComponentVec {
     }
 
     /// Create a vector by recursively scanning the provided directory.
-    pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
+    pub fn from_dir<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
         // Id starts with 1.
@@ -346,7 +346,7 @@ mod tests {
                 ])
                 .create(u)?;
             let paths_only = u.arbitrary()?;
-            let nodes = PathComponentVec::from_directory(directory.path(), paths_only).unwrap();
+            let nodes = PathComponentVec::from_dir(directory.path(), paths_only).unwrap();
             Ok(nodes)
         }
     }
