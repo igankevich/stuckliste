@@ -265,10 +265,7 @@ impl BigEndianRead for RawTree {
         }
         let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
-            return Err(Error::other(format!(
-                "unsupported tree version: {}",
-                version
-            )));
+            return Err(Error::other("unsupported tree version"));
         }
         let root = u32::read_be(reader.by_ref())?;
         let block_len = u32::read_be(reader.by_ref())?;
@@ -331,7 +328,7 @@ impl BigEndianWrite for RawTreeNode {
             .entries
             .len()
             .try_into()
-            .map_err(|_| Error::other("too many entries"))?;
+            .map_err(|_| Error::other("too many tree entries"))?;
         is_data.write_be(writer.by_ref())?;
         num_entries.write_be(writer.by_ref())?;
         self.next.write_be(writer.by_ref())?;

@@ -40,11 +40,7 @@ impl BlockRead<Context> for VirtualPathTree {
         let mut reader = blocks.slice(i, file)?;
         let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
-            // TODO better errors
-            return Err(Error::other(format!(
-                "unsupported VirtualPathTree version: {}",
-                version
-            )));
+            return Err(Error::other("unsupported vindex version"));
         }
         let i = u32::read_be(reader.by_ref())?;
         let _x0 = u32::read_be(reader.by_ref())?;

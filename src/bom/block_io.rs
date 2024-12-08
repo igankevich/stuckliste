@@ -66,7 +66,8 @@ impl<C> BlockRead<C> for CString {
         _context: &mut C,
     ) -> Result<Self, Error> {
         let block = blocks.slice(i, file)?;
-        let c_str = CStr::from_bytes_with_nul(block).map_err(Error::other)?;
+        let c_str =
+            CStr::from_bytes_with_nul(block).map_err(|_| Error::other("invalid c-string"))?;
         Ok(c_str.into())
     }
 }

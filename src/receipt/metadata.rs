@@ -287,7 +287,8 @@ impl Metadata {
                 );
                 let mut target = vec![0_u8; target_len as usize];
                 reader.read_exact(&mut target[..])?;
-                let target = CString::from_vec_with_nul(target).map_err(Error::other)?;
+                let target = CString::from_vec_with_nul(target)
+                    .map_err(|_| Error::other("invalid c-string"))?;
                 let target = OsStr::from_bytes(target.to_bytes());
                 Metadata::Link(Link {
                     common,

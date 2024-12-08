@@ -89,7 +89,7 @@ impl Bom {
         let i = self
             .named_blocks
             .get(name)
-            .ok_or_else(|| Error::other(format!("`{:?}` block not found", name)))?;
+            .ok_or_else(|| Error::other("named block not found"))?;
         T::read_block(i, file, &mut self.blocks, context)
     }
 
@@ -112,11 +112,8 @@ impl Bom {
             return Err(Error::other("not a bom store"));
         }
         let version = u32::read_be(reader.by_ref())?;
-        if version != 1 {
-            return Err(Error::other(format!(
-                "unsupported BOM store version: {}",
-                version
-            )));
+        if version != Self::VERSION {
+            return Err(Error::other("unsupported bom store version"));
         }
         let num_non_null_blocks = u32::read_be(reader.by_ref())?;
         let blocks = Block {

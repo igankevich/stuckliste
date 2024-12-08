@@ -59,10 +59,7 @@ impl BigEndianRead for BomInfo {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
-            return Err(Error::other(format!(
-                "unsupported BOMInfo version: {}",
-                version
-            )));
+            return Err(Error::other("unsupported bom info version"));
         }
         let num_paths = u32::read_be(reader.by_ref())?;
         let num_entries = u32::read_be(reader.by_ref())?;

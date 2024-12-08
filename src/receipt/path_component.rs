@@ -107,7 +107,8 @@ impl BlockRead<Context> for PathComponentValue {
     ) -> Result<Self, Error> {
         let mut reader = blocks.slice(i, file)?;
         let parent = u32::read_be(reader.by_ref())?;
-        let name = CStr::from_bytes_with_nul(reader).map_err(Error::other)?;
+        let name =
+            CStr::from_bytes_with_nul(reader).map_err(|_| Error::other("invalid c-string"))?;
         Ok(Self {
             parent,
             name: name.into(),
@@ -173,7 +174,7 @@ impl PathComponentVec {
         let mut components = Vec::new();
         loop {
             if !visited.insert(seq_no) {
-                return Err(Error::other("loop"));
+                return Err(Error::other("file system loop"));
             }
             if seq_no == 0 {
                 break;
@@ -230,7 +231,7 @@ impl PathComponentVec {
                 Some(s) => s.as_bytes(),
                 None => relative_path.as_os_str().as_bytes(),
             };
-            let name = CString::new(name).map_err(Error::other)?;
+            let name = CString::new(name).map_err(|_| Error::other("invalid c-string"))?;
             let node = PathComponent {
                 seq_no,
                 parent,
