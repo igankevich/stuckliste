@@ -158,8 +158,8 @@ impl Metadata {
         }) = metadata
         {
             let mut file = std::fs::File::open(path)?;
-            let arches = match FatBinary::read_be(&mut file) {
-                Ok(fat) => fat.to_executable_arches(file)?,
+            let (arches, is_fat) = match FatBinary::read_be(&mut file) {
+                Ok(fat) => (fat.to_executable_arches(file)?, true),
                 Err(_) => {
                     file.rewind()?;
                     match MachObject::read_be(file) {
@@ -168,9 +168,9 @@ impl Metadata {
                             // This value overflows for files larger than 4 GiB.
                             arch.size = common.size as u32;
                             arch.checksum = *checksum;
-                            vec![arch]
+                            (vec![arch], false)
                         }
-                        Err(_) => Default::default(),
+                        Err(_) => (Default::default(), false),
                     }
                 }
             };
@@ -184,6 +184,7 @@ impl Metadata {
                     common: file.common,
                     checksum: file.checksum,
                     arches,
+                    is_fat,
                 });
             }
         }
@@ -193,14 +194,7 @@ impl Metadata {
     /// Get binary type.
     pub fn binary_type(&self) -> BinaryType {
         match self {
-            Metadata::Executable(Executable { ref arches, .. }) => {
-                // TODO this probably depends on file magic, not on the number of arches
-                if arches.len() == 1 {
-                    BinaryType::Executable
-                } else {
-                    BinaryType::Fat
-                }
-            }
+            Metadata::Executable(exe) => exe.kind(),
             _ => BinaryType::Unknown,
         }
     }
@@ -262,6 +256,7 @@ impl Metadata {
                     common,
                     checksum,
                     arches,
+                    is_fat: binary_type == BinaryType::Fat,
                 })
             }
             FileType::Regular => {
@@ -331,6 +326,7 @@ impl Metadata {
                 common,
                 checksum,
                 arches,
+                is_fat: _is_fat,
             }) => {
                 common.write_be(writer.by_ref())?;
                 checksum.write_be(writer.by_ref())?;
@@ -463,12 +459,27 @@ pub struct Executable {
     common: Common,
     checksum: u32,
     arches: Vec<ExecutableArch>,
+    is_fat: bool,
 }
 
 impl Executable {
     /// Get checksum.
     pub fn checksum(&self) -> u32 {
         self.checksum
+    }
+
+    /// Is this a fat binary?
+    pub fn is_fat(&self) -> bool {
+        self.is_fat
+    }
+
+    /// Get executable type.
+    pub fn kind(&self) -> BinaryType {
+        if self.is_fat {
+            BinaryType::Fat
+        } else {
+            BinaryType::Mach
+        }
     }
 
     /// Get all architectures this executable was compiled for.
@@ -622,19 +633,19 @@ impl BigEndianWrite for ExecutableArch {
 pub enum BinaryType {
     /// Regular file.
     Unknown = 0,
-    /// Single-architecture executable file.
-    Executable = 1,
-    /// Multiple-architectures executable file (universal binary).
+    /// Mach object file.
+    Mach = 1,
+    /// Universal binary file.
     Fat = 2,
 }
 
 fn get_binary_type(flags: u16) -> BinaryType {
     const UNKNOWN: u8 = BinaryType::Unknown as u8;
-    const EXECUTABLE: u8 = BinaryType::Executable as u8;
+    const MACH: u8 = BinaryType::Mach as u8;
     const FAT: u8 = BinaryType::Fat as u8;
     match ((flags >> 12) & 0xf) as u8 {
         UNKNOWN => BinaryType::Unknown,
-        EXECUTABLE => BinaryType::Executable,
+        MACH => BinaryType::Mach,
         FAT => BinaryType::Fat,
         _ => BinaryType::Unknown,
     }
@@ -799,6 +810,7 @@ mod tests {
                 common,
                 checksum: u.arbitrary()?,
                 arches,
+                is_fat: u.arbitrary()?,
             })
         }
     }
