@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v4.1.4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo test --workspace --all-targets
-  publish:
+  publish-crates:
     needs: [ubuntu, macos]
     runs-on: ubuntu-latest
     container:
@@ -69,3 +69,34 @@ jobs:
         # [Sun Dec 08 14:21:28 2024] cijail: Symbolic link loop (os error 40)
         # rm: error while loading shared libraries: libc.so.6: cannot open shared object file: Error 38
         run: ./ci/publish.sh
+  publish-binaries:
+    needs: [ubuntu, macos]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/igankevich/stuckliste-ci:latest
+      options: --cap-add SYS_PTRACE
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - name: Build static binaries
+        run: ./ci/build.sh
+      - name: Create release
+        uses: actions/create-release@v1
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+      - name: Upload binaries
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./stuckliste-${{  github.ref_name }}.tar.gz
+          asset_name: stuckliste-${{  github.ref_name }}.tar.gz
+          asset_content_type: application/gzip
