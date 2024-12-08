@@ -1,6 +1,6 @@
 [package]
 name = "stuckliste"
-version = "0.3.2"
+version.workspace = true
 edition = "2021"
 license = "GPL-3.0"
 homepage = "https://github.com/igankevich/stuckliste"
@@ -24,6 +24,9 @@ arbtest.workspace = true
 
 [workspace]
 members = [".", "cli"]
+
+[workspace.package]
+version = "0.3.2"
 
 [workspace.dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"] }
