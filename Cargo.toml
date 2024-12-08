@@ -1,6 +1,6 @@
 [package]
 name = "stuckliste"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 license = "GPL-3.0"
 homepage = "https://github.com/igankevich/stuckliste"
@@ -29,6 +29,7 @@ members = [".", "cli"]
 arbitrary = { version = "1.4.1", features = ["derive"] }
 arbtest = "0.3.1"
 random-dir = "0.2.3"
+stuckliste = { path = ".", version = "*" }
 
 [lints.clippy]
 unwrap_used = "deny"
