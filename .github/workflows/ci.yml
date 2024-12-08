@@ -65,4 +65,7 @@ jobs:
           CIJAIL_ENDPOINTS: |
             ${{ env.CIJAIL_ENDPOINTS }}
             https://crates.io/api/v1/crates/new
-        run: cijail ./ci/publish.sh
+        # running with cijail give symbolic link loop error:
+        # [Sun Dec 08 14:21:28 2024] cijail: Symbolic link loop (os error 40)
+        # rm: error while loading shared libraries: libc.so.6: cannot open shared object file: Error 38
+        run: ./ci/publish.sh
