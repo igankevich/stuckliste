@@ -26,7 +26,7 @@ arbtest.workspace = true
 members = [".", "cli"]
 
 [workspace.package]
-version = "0.3.6"
+version = "0.3.7"
 
 [workspace.dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"] }

@@ -73,7 +73,7 @@ jobs:
         run: ./ci/publish.sh
   publish-binaries:
     needs: [ubuntu, macos]
-    if: ${{ github.ref == 'refs/tags/*' }}
+    if: github.ref_type == 'tag'
     permissions:
       contents: write
       packages: read
