@@ -4,41 +4,50 @@ use std::io::Error;
 use std::io::Seek;
 use std::io::Write;
 
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 use crate::Blocks;
 
-pub trait BlockIo<C = ()> {
+/// Read values from BOM blocks.
+pub trait BlockRead<C = ()> {
+    /// Read `Self` from block `i`.
+    fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, context: &mut C) -> Result<Self, Error>
+    where
+        Self: Sized;
+}
+
+/// Read values into BOM blocks.
+pub trait BlockWrite<C = ()> {
+    /// Write `self` to a block and return its index.
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
         blocks: &mut Blocks,
         context: &mut C,
     ) -> Result<u32, Error>;
-
-    fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, context: &mut C) -> Result<Self, Error>
-    where
-        Self: Sized;
 }
 
-impl<T: BigEndianIo, C> BlockIo<C> for T {
+impl<T: BigEndianWrite, C> BlockWrite<C> for T {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
         blocks: &mut Blocks,
         _context: &mut C,
     ) -> Result<u32, Error> {
-        blocks.append(writer, |writer| BigEndianIo::write_be(self, writer))
+        blocks.append(writer, |writer| BigEndianWrite::write_be(self, writer))
     }
+}
 
+impl<T: BigEndianRead, C> BlockRead<C> for T {
     fn read_block(i: u32, file: &[u8], blocks: &mut Blocks, _context: &mut C) -> Result<Self, Error>
     where
         Self: Sized,
     {
-        BigEndianIo::read_be(blocks.slice(i, file)?)
+        BigEndianRead::read_be(blocks.slice(i, file)?)
     }
 }
 
-impl<C> BlockIo<C> for CString {
+impl<C> BlockWrite<C> for CString {
     fn write_block<W: Write + Seek>(
         &self,
         writer: W,
@@ -47,7 +56,9 @@ impl<C> BlockIo<C> for CString {
     ) -> Result<u32, Error> {
         blocks.append(writer, |writer| writer.write_all(self.to_bytes_with_nul()))
     }
+}
 
+impl<C> BlockRead<C> for CString {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -55,12 +66,13 @@ impl<C> BlockIo<C> for CString {
         _context: &mut C,
     ) -> Result<Self, Error> {
         let block = blocks.slice(i, file)?;
-        let c_str = CStr::from_bytes_with_nul(block).map_err(Error::other)?;
+        let c_str =
+            CStr::from_bytes_with_nul(block).map_err(|_| Error::other("invalid c-string"))?;
         Ok(c_str.into())
     }
 }
 
-impl<C, T: BlockIo<C>> BlockIo<C> for Option<T> {
+impl<C, T: BlockWrite<C>> BlockWrite<C> for Option<T> {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -73,7 +85,9 @@ impl<C, T: BlockIo<C>> BlockIo<C> for Option<T> {
         };
         blocks.append(writer, |writer| i.write_be(writer))
     }
+}
 
+impl<C, T: BlockRead<C>> BlockRead<C> for Option<T> {
     fn read_block(
         i: u32,
         file: &[u8],

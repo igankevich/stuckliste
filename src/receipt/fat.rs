@@ -1,14 +1,32 @@
-#![allow(unused)]
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+
+use crate::receipt::CrcReader;
+use crate::receipt::ExecutableArch;
+use crate::BigEndianRead;
 
 pub struct FatBinary {
     arches: Vec<FatArch>,
 }
 
 impl FatBinary {
-    pub fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
+    pub fn to_executable_arches<R: Read + Seek>(
+        &self,
+        mut file: R,
+    ) -> Result<Vec<ExecutableArch>, Error> {
+        let mut arches = Vec::with_capacity(self.arches.len());
+        for arch in self.arches.iter() {
+            arches.push(arch.to_executable_arch(file.by_ref())?);
+        }
+        Ok(arches)
+    }
+}
+
+impl BigEndianRead for FatBinary {
+    fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut header = [0_u8; HEADER_LEN];
         reader.read_exact(&mut header[..])?;
         let magic = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
@@ -31,45 +49,42 @@ pub struct FatArch {
     cpu_sub_type: u32,
     offset: u64,
     size: u64,
-    align: u32,
 }
 
 impl FatArch {
     pub fn read_be<R: Read>(mut reader: R, is_64_bit: bool) -> Result<Self, Error> {
-        let cpu_type = u32_read(reader.by_ref())?;
-        let cpu_sub_type = u32_read(reader.by_ref())?;
+        let cpu_type = u32::read_be(reader.by_ref())?;
+        let cpu_sub_type = u32::read_be(reader.by_ref())?;
         let (offset, size) = if is_64_bit {
-            let offset = u64_read(reader.by_ref())?;
-            let size = u64_read(reader.by_ref())?;
+            let offset = u64::read_be(reader.by_ref())?;
+            let size = u64::read_be(reader.by_ref())?;
             (offset, size)
         } else {
-            let offset = u32_read(reader.by_ref())?;
-            let size = u32_read(reader.by_ref())?;
+            let offset = u32::read_be(reader.by_ref())?;
+            let size = u32::read_be(reader.by_ref())?;
             (offset as u64, size as u64)
         };
-        let align = u32_read(reader.by_ref())?;
         Ok(Self {
             cpu_type,
             cpu_sub_type,
             offset,
             size,
-            align,
         })
     }
-}
 
-fn u32_read<R: Read>(mut reader: R) -> Result<u32, Error> {
-    let mut data = [0_u8; 4];
-    reader.read_exact(&mut data[..])?;
-    Ok(u32::from_be_bytes([data[0], data[1], data[2], data[3]]))
-}
-
-fn u64_read<R: Read>(mut reader: R) -> Result<u64, Error> {
-    let mut data = [0_u8; 8];
-    reader.read_exact(&mut data[..])?;
-    Ok(u64::from_be_bytes([
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-    ]))
+    pub fn to_executable_arch<R: Read + Seek>(&self, mut file: R) -> Result<ExecutableArch, Error> {
+        file.seek(SeekFrom::Start(self.offset))?;
+        let file_slice = file.take(self.size);
+        let crc_reader = CrcReader::new(file_slice);
+        let checksum = crc_reader.digest()?;
+        Ok(ExecutableArch {
+            cpu_type: self.cpu_type,
+            cpu_sub_type: self.cpu_sub_type,
+            // This value overflows for files larger than 4 GiB.
+            size: self.size as u32,
+            checksum,
+        })
+    }
 }
 
 const HEADER_LEN: usize = 8;

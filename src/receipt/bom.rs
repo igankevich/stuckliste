@@ -1,4 +1,5 @@
 use std::ffi::CStr;
+use std::fs::File;
 use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
@@ -14,119 +15,137 @@ use crate::receipt::HardLinks;
 use crate::receipt::Metadata;
 use crate::receipt::PathComponentVec;
 use crate::receipt::VirtualPathTree;
-use crate::BigEndianIo;
-use crate::BlockIo;
-use crate::Blocks;
 use crate::Bom;
-use crate::NamedBlocks;
 
+/// Configuration for creating a receipt.
+pub struct ReceiptBuilder {
+    paths_only: bool,
+}
+
+impl ReceiptBuilder {
+    /// Create receipt builder with the default parameters.
+    pub fn new() -> Self {
+        Self { paths_only: false }
+    }
+
+    /// Do not include metadata in the receipt, include only file paths.
+    pub fn paths_only(mut self, value: bool) -> Self {
+        self.paths_only = value;
+        self
+    }
+
+    /// Create a receipt using the provided parameters.
+    pub fn create<P: AsRef<Path>>(self, directory: P) -> Result<Receipt, Error> {
+        let entries = PathComponentVec::from_dir(directory, self.paths_only)?;
+        Ok(Receipt { entries })
+    }
+}
+
+impl Default for ReceiptBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// This is what is usually called a BOM file.
+///
+/// This file contains a list of file paths and metadata for an installed package.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Receipt {
-    tree: PathComponentVec,
+    entries: PathComponentVec,
 }
 
 impl Receipt {
-    pub fn paths(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
-        self.tree.to_paths()
+    /// Get paths and the corresponding metadata.
+    pub fn entries(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
+        self.entries.to_paths()
     }
 
-    pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
-        let tree = PathComponentVec::from_directory(directory, paths_only)?;
-        Ok(Self { tree })
+    /// Compute and return per-architecture file statistics.
+    pub fn stats(&self) -> BomInfo {
+        BomInfo::new(&self.entries)
     }
 
+    /// Write receipt to `writer` in bill-of-materials (BOM) format.
     pub fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
         // skip the header
         writer.seek(SeekFrom::Start(Bom::LEN as u64))?;
-        let mut blocks = Blocks::new();
-        let mut named_blocks = NamedBlocks::new();
+        let mut bom = Bom::new();
         let mut context = Context::new();
-        {
-            let vindex = VirtualPathTree::new();
-            let i = vindex.write_block(writer.by_ref(), &mut blocks, &mut context)?;
-            named_blocks.insert(V_INDEX.into(), i);
-        }
-        // hl index
-        {
-            let hard_links = std::mem::take(&mut context.hard_links);
-            let i = hard_links.write_block(writer.by_ref(), &mut blocks, &mut context)?;
-            named_blocks.insert(HL_INDEX.into(), i);
-        }
-        // paths
-        {
-            let i = self
-                .tree
-                .write_block(writer.by_ref(), &mut blocks, &mut context)?;
-            named_blocks.insert(PATHS.into(), i);
-        };
-        // size 64
-        {
-            let file_size_64 = std::mem::take(&mut context.file_size_64);
-            let i = file_size_64.write_block(writer.by_ref(), &mut blocks, &mut context)?;
-            named_blocks.insert(SIZE_64.into(), i);
-        }
-        // bom info
-        {
-            let bom_info = BomInfo::new(&self.tree);
-            let i = blocks.append(writer.by_ref(), |writer| bom_info.write_be(writer))?;
-            named_blocks.insert(BOM_INFO.into(), i);
-        }
+        bom.write_named(
+            Self::V_INDEX,
+            writer.by_ref(),
+            &VirtualPathTree::new(),
+            &mut context,
+        )?;
+        bom.write_named(
+            Self::HL_INDEX,
+            writer.by_ref(),
+            &std::mem::take(&mut context.hard_links),
+            &mut context,
+        )?;
+        bom.write_named(Self::PATHS, writer.by_ref(), &self.entries, &mut context)?;
+        bom.write_named(
+            Self::SIZE_64,
+            writer.by_ref(),
+            &std::mem::take(&mut context.file_sizes),
+            &mut context,
+        )?;
+        bom.write_named(
+            Self::BOM_INFO,
+            writer.by_ref(),
+            &BomInfo::new(&self.entries),
+            &mut context,
+        )?;
         // write the header
-        let header = Bom {
-            blocks,
-            named_blocks,
-        };
-        header.write(writer.by_ref())?;
+        bom.write(writer.by_ref())?;
         Ok(())
     }
 
+    /// Read a receipt from file under `path`.
+    pub fn open<P: AsRef<Path>>(self, path: P) -> Result<Receipt, Error> {
+        let file = File::open(path)?;
+        Self::read(file)
+    }
+
+    /// Read a receipt from `reader`.
     pub fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut file = Vec::new();
         reader.read_to_end(&mut file)?;
-        let header = Bom::read(&file[..])?;
-        let mut blocks = header.blocks;
-        let mut named_blocks = header.named_blocks;
-        if let Some(index) = named_blocks.remove(BOM_INFO) {
-            let _bom_info = BomInfo::read_be(blocks.slice(index, &file)?)?;
-        }
+        let mut bom = Bom::read(&file[..])?;
         let mut context = Context::new();
-        if let Some(index) = named_blocks.remove(V_INDEX) {
-            let _vindex = VirtualPathTree::read_block(index, &file, &mut blocks, &mut context)?;
+        //let _stats: BomInfo = bom.read_named(Self::BOM_INFO, &file, &mut context)?;
+        //let _vindex: VirtualPathTree = bom.read_named(Self::V_INDEX, &file, &mut context)?;
+        if let Some(i) = bom.get_named(Self::SIZE_64) {
+            let file_sizes: FileSizes64 = bom.read_regular(i, &file, &mut context)?;
+            context.file_sizes = file_sizes;
         }
-        // block id -> file size
-        if let Some(index) = named_blocks.remove(SIZE_64) {
-            let file_size_64 = FileSizes64::read_block(index, &file, &mut blocks, &mut context)?;
-            context.file_size_64 = file_size_64;
-        }
-        if let Some(index) = named_blocks.remove(HL_INDEX) {
-            let hard_links = HardLinks::read_block(index, &file, &mut blocks, &mut context)?;
+        if let Some(i) = bom.get_named(Self::HL_INDEX) {
+            let hard_links: HardLinks = bom.read_regular(i, &file, &mut context)?;
             context.hard_links = hard_links;
         }
-        // id -> data
-        let i = named_blocks
-            .remove(PATHS)
-            .ok_or_else(|| Error::other(format!("`{:?}` block not found", PATHS)))?;
-        let tree = PathComponentVec::read_block(i, &file, &mut blocks, &mut context)?;
-        debug_assert!(named_blocks.is_empty(), "named blocks {:?}", named_blocks);
-        Ok(Self { tree })
+        let entries: PathComponentVec = bom.read_named(Self::PATHS, &file, &mut context)?;
+        Ok(Self { entries })
     }
+
+    /// Virtual paths named block.
+    ///
+    /// Virtual paths (i.e. paths defined with regular expressions).
+    pub const V_INDEX: &'static CStr = c"VIndex";
+
+    /// Hard links named block.
+    pub const HL_INDEX: &'static CStr = c"HLIndex";
+
+    /// 64-bit file sizes named block.
+    pub const SIZE_64: &'static CStr = c"Size64";
+
+    /// Per-architecture file statistics named block,
+    pub const BOM_INFO: &'static CStr = c"BomInfo";
+
+    /// File path components tree named block.
+    pub const PATHS: &'static CStr = c"Paths";
 }
-
-/// Virtual paths (i.e. paths defined with regular expressions).
-pub const V_INDEX: &CStr = c"VIndex";
-
-/// Hard links.
-pub const HL_INDEX: &CStr = c"HLIndex";
-
-/// 64-bit file sizes.
-pub const SIZE_64: &CStr = c"Size64";
-
-/// Per-architecture file statistics.
-pub const BOM_INFO: &CStr = c"BomInfo";
-
-/// File path components tree.
-pub const PATHS: &CStr = c"Paths";
 
 #[cfg(test)]
 mod tests {
@@ -145,6 +164,7 @@ mod tests {
             let bytes = writer.into_inner();
             let actual = Receipt::read(&bytes[..]).unwrap();
             assert_eq!(expected, actual);
+            assert_eq!(expected.stats(), actual.stats());
             Ok(())
         });
     }

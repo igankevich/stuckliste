@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use stuckliste::receipt::Receipt;
+use stuckliste::receipt::ReceiptBuilder;
 
 #[derive(Parser)]
 struct Args {
@@ -41,7 +41,9 @@ fn do_main() -> Result<ExitCode, Error> {
         return Err(Error::other("output file is not specified"));
     };
     if let Some(directory) = args.directory {
-        let bom = Receipt::from_directory(&directory, args.paths_only)?;
+        let bom = ReceiptBuilder::new()
+            .paths_only(args.paths_only)
+            .create(&directory)?;
         let file = File::create(&output_path)?;
         bom.write(file)?;
         Ok(ExitCode::SUCCESS)

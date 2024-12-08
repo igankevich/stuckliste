@@ -8,10 +8,15 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use crate::io::*;
-use crate::BlockIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
+/// `Vec`-based BOM tree representation.
+///
+/// The contents of the tree are key-value pairs with no uniqueness constraint on the key.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct VecTree<K, V, C> {
@@ -22,8 +27,12 @@ pub struct VecTree<K, V, C> {
 }
 
 impl<K, V, C> VecTree<K, V, C> {
+    /// Create a new tree with provided `entries` and `block_len` block size.
+    ///
+    /// The block size is silently made at least `MIN_BLOCK_LEN`
+    /// to ensure that it can hold at least one entry.
     pub fn new(entries: Vec<(K, V)>, block_len: usize) -> Self {
-        let block_len = block_len.clamp(MIN_BLOCK_LEN, MAX_BLOCK_LEN);
+        let block_len = block_len.max(MIN_BLOCK_LEN);
         Self {
             entries,
             block_len,
@@ -31,8 +40,14 @@ impl<K, V, C> VecTree<K, V, C> {
         }
     }
 
+    /// Transform into underlying entries.
     pub fn into_inner(self) -> Vec<(K, V)> {
         self.entries
+    }
+
+    /// Get block size.
+    pub fn block_len(&self) -> usize {
+        self.block_len
     }
 }
 
@@ -60,7 +75,7 @@ impl<K, V, C> DerefMut for VecTree<K, V, C> {
     }
 }
 
-impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
+impl<C, K: BlockWrite<C>, V: BlockWrite<C>> BlockWrite<C> for VecTree<K, V, C> {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -84,7 +99,6 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
                 entries: raw_entries,
                 is_data: true,
             };
-
             blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?
             //let raw_entries = vec![(block, last_value_block)];
             //let meta_node = RawTreeNode {
@@ -181,7 +195,9 @@ impl<C, K: BlockIo<C>, V: BlockIo<C>> BlockIo<C> for VecTree<K, V, C> {
         };
         blocks.append(writer.by_ref(), |writer| tree.write_be(writer))
     }
+}
 
+impl<C, K: BlockRead<C>, V: BlockRead<C>> BlockRead<C> for VecTree<K, V, C> {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -240,7 +256,7 @@ impl RawTree {
     const VERSION: u32 = 1;
 }
 
-impl BigEndianIo for RawTree {
+impl BigEndianRead for RawTree {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut magic = [0_u8; 4];
         reader.read_exact(&mut magic[..])?;
@@ -249,10 +265,7 @@ impl BigEndianIo for RawTree {
         }
         let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
-            return Err(Error::other(format!(
-                "unsupported tree version: {}",
-                version
-            )));
+            return Err(Error::other("unsupported tree version"));
         }
         let root = u32::read_be(reader.by_ref())?;
         let block_len = u32::read_be(reader.by_ref())?;
@@ -264,7 +277,9 @@ impl BigEndianIo for RawTree {
             num_entries,
         })
     }
+}
 
+impl BigEndianWrite for RawTree {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         writer.write_all(&TREE_MAGIC[..])?;
         Self::VERSION.write_be(writer.by_ref())?;
@@ -285,7 +300,7 @@ struct RawTreeNode {
     is_data: bool,
 }
 
-impl BigEndianIo for RawTreeNode {
+impl BigEndianRead for RawTreeNode {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let is_data = u16::read_be(reader.by_ref())? != 0;
         let num_entries = u16::read_be(reader.by_ref())?;
@@ -304,14 +319,16 @@ impl BigEndianIo for RawTreeNode {
             is_data,
         })
     }
+}
 
+impl BigEndianWrite for RawTreeNode {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let is_data: u16 = if self.is_data { 1 } else { 0 };
         let num_entries: u16 = self
             .entries
             .len()
             .try_into()
-            .map_err(|_| Error::other("too many entries"))?;
+            .map_err(|_| Error::other("too many tree entries"))?;
         is_data.write_be(writer.by_ref())?;
         num_entries.write_be(writer.by_ref())?;
         self.next.write_be(writer.by_ref())?;
@@ -348,8 +365,7 @@ const NODE_HEADER_LEN: usize = 2 + 2 + 4 + 4;
 const ENTRY_LEN: usize = 4 + 4;
 
 /// The size of the block that can hold one entry maximum.
-const MIN_BLOCK_LEN: usize = NODE_HEADER_LEN + ENTRY_LEN;
-const MAX_BLOCK_LEN: usize = 4096 * 16;
+pub const MIN_BLOCK_LEN: usize = NODE_HEADER_LEN + ENTRY_LEN;
 
 #[cfg(test)]
 mod tests {
@@ -399,4 +415,6 @@ mod tests {
             })
         }
     }
+
+    const MAX_BLOCK_LEN: usize = 4096 * 16;
 }

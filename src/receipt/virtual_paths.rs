@@ -6,8 +6,10 @@ use std::io::Write;
 
 use crate::receipt::Context;
 use crate::receipt::VecTree;
-use crate::BigEndianIo;
-use crate::BlockIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 /// Directory name to regex mapping.
@@ -20,6 +22,7 @@ pub struct VirtualPathTree {
 impl VirtualPathTree {
     const VERSION: u32 = 1;
 
+    /// Create an empty tree.
     pub fn new() -> Self {
         Self {
             tree: Default::default(),
@@ -27,7 +30,7 @@ impl VirtualPathTree {
     }
 }
 
-impl BlockIo<Context> for VirtualPathTree {
+impl BlockRead<Context> for VirtualPathTree {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -37,10 +40,7 @@ impl BlockIo<Context> for VirtualPathTree {
         let mut reader = blocks.slice(i, file)?;
         let version = u32::read_be(reader.by_ref())?;
         if version != Self::VERSION {
-            return Err(Error::other(format!(
-                "unsupported VirtualPathTree version: {}",
-                version
-            )));
+            return Err(Error::other("unsupported vindex version"));
         }
         let i = u32::read_be(reader.by_ref())?;
         let _x0 = u32::read_be(reader.by_ref())?;
@@ -52,7 +52,9 @@ impl BlockIo<Context> for VirtualPathTree {
         let tree = VecTree::read_block(i, file, blocks, context)?;
         Ok(Self { tree })
     }
+}
 
+impl BlockWrite<Context> for VirtualPathTree {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,

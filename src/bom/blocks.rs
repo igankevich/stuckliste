@@ -5,7 +5,8 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
 
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 
 /// Block of data in the BOM file.
 ///
@@ -85,7 +86,7 @@ impl Blocks {
     }
 }
 
-impl BigEndianIo for Blocks {
+impl BigEndianRead for Blocks {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let num_blocks = u32::read_be(reader.by_ref())? as usize;
         let mut blocks = Vec::with_capacity(num_blocks);
@@ -112,7 +113,9 @@ impl BigEndianIo for Blocks {
             unread_blocks,
         })
     }
+}
 
+impl BigEndianWrite for Blocks {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let num_blocks = self.blocks.len() as u32;
         num_blocks.write_be(writer.by_ref())?;
@@ -177,13 +180,15 @@ impl Block {
     }
 }
 
-impl BigEndianIo for Block {
+impl BigEndianRead for Block {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let offset = u32::read_be(reader.by_ref())?;
         let len = u32::read_be(reader.by_ref())?;
         Ok(Self { offset, len })
     }
+}
 
+impl BigEndianWrite for Block {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         self.offset.write_be(writer.by_ref())?;
         self.len.write_be(writer.by_ref())?;

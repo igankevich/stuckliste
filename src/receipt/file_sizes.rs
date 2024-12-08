@@ -7,7 +7,8 @@ use std::ops::DerefMut;
 
 use crate::receipt::Context;
 use crate::receipt::VecTree;
-use crate::BlockIo;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
 /// Metadata block index to 64-bit file size mapping.
@@ -18,6 +19,7 @@ pub struct FileSizes64(HashMap<u32, u64>);
 impl FileSizes64 {
     const BLOCK_LEN: usize = 128;
 
+    /// Transform into inner representation.
     pub fn into_inner(self) -> HashMap<u32, u64> {
         self.0
     }
@@ -37,7 +39,7 @@ impl DerefMut for FileSizes64 {
     }
 }
 
-impl BlockIo<Context> for FileSizes64 {
+impl BlockWrite<Context> for FileSizes64 {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -51,7 +53,9 @@ impl BlockIo<Context> for FileSizes64 {
         let i = file_size_tree.write_block(writer.by_ref(), blocks, context)?;
         Ok(i)
     }
+}
 
+impl BlockRead<Context> for FileSizes64 {
     fn read_block(
         i: u32,
         file: &[u8],

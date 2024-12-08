@@ -3,31 +3,38 @@ use std::io::Seek;
 use std::io::Write;
 
 use crate::receipt::Context;
-use crate::BigEndianIo;
-use crate::BlockIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
+/// A pointer to a regular block.
+///
+/// A block that stores another block's index as `u32` value.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Ptr<T>(T);
 
 impl<T> Ptr<T> {
+    /// Create new pointer fomr the provided value.
     pub fn new(value: T) -> Self {
         Self(value)
     }
 
+    /// Transform into underlying value.
     pub fn into_inner(self) -> T {
         self.0
     }
 }
 
-impl<T: BlockIo<Context>> From<T> for Ptr<T> {
+impl<T> From<T> for Ptr<T> {
     fn from(other: T) -> Ptr<T> {
         Self(other)
     }
 }
 
-impl<T: BlockIo<Context>> BlockIo<Context> for Ptr<T> {
+impl<T: BlockWrite<Context>> BlockWrite<Context> for Ptr<T> {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -37,7 +44,9 @@ impl<T: BlockIo<Context>> BlockIo<Context> for Ptr<T> {
         let i = self.0.write_block(writer.by_ref(), blocks, context)?;
         blocks.append(writer, |writer| i.write_be(writer))
     }
+}
 
+impl<T: BlockRead<Context>> BlockRead<Context> for Ptr<T> {
     fn read_block(
         i: u32,
         file: &[u8],

@@ -109,10 +109,10 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
     use std::fmt::Write;
     let file = File::open(path)?;
     let bom = Receipt::read(file)?;
-    let paths = bom.paths()?;
+    let entries = bom.entries()?;
     let list = args.list();
     let mut line = String::with_capacity(4096);
-    for (path, metadata) in paths.iter() {
+    for (path, metadata) in entries.iter() {
         line.clear();
         let print = match &metadata {
             Metadata::File(file) if list.contains(List::Files) => {
@@ -169,7 +169,7 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
                     "\t{}\t{}\t{}",
                     metadata.size(),
                     link.checksum(),
-                    link.name().display()
+                    link.target().display()
                 )
                 .map_err(Error::other)?;
                 true

@@ -45,6 +45,12 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && rm -rf /tmp/bomutils \
     && rm -rf /var/lib/apt/lists/*
 
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -qq update \
+    && apt-get -qq install --no-install-recommends \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=ghcr.io/staex-io/cijail:latest / /usr/local
 
 LABEL org.opencontainers.image.source=https://github.com/igankevich/stuckliste

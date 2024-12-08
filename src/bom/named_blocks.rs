@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::io::Error;
@@ -5,61 +6,60 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 
-use crate::BigEndianIo;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
 
 /// Blocks addressed by a well-known name.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct NamedBlocks {
     /// Block name to block index mapping.
-    blocks: Vec<(CString, u32)>,
+    blocks: HashMap<CString, u32>,
 }
 
 impl NamedBlocks {
+    /// Construct empty named blocks.
     pub fn new() -> Self {
         Self {
             blocks: Default::default(),
         }
     }
 
+    /// Get the number of named blocks.
     pub fn len(&self) -> usize {
         self.blocks.len()
     }
 
+    /// Is there are no blocks?
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
 
+    /// Add a new named block.
     pub fn insert(&mut self, name: CString, block: u32) {
-        self.blocks.push((name, block));
+        self.blocks.insert(name, block);
     }
 
+    /// Remove existing named block.
     pub fn remove(&mut self, name: &CStr) -> Option<u32> {
-        self.blocks
-            .iter()
-            .position(|(block_name, _block)| block_name.as_c_str() == name)
-            .map(|i| self.blocks.remove(i).1)
+        self.blocks.remove(name)
     }
 
+    /// Get named block.
     pub fn get(&self, name: &CStr) -> Option<u32> {
-        self.blocks.iter().find_map(|(block_name, block)| {
-            if block_name.as_c_str() == name {
-                Some(*block)
-            } else {
-                None
-            }
-        })
+        self.blocks.get(name).copied()
     }
 
-    pub fn into_inner(self) -> Vec<(CString, u32)> {
+    /// Transform into inner representation.
+    pub fn into_inner(self) -> HashMap<CString, u32> {
         self.blocks
     }
 }
 
-impl BigEndianIo for NamedBlocks {
+impl BigEndianRead for NamedBlocks {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let num_named_blocks = u32::read_be(reader.by_ref())? as usize;
-        let mut blocks = Vec::with_capacity(num_named_blocks);
+        let mut blocks = HashMap::with_capacity(num_named_blocks);
         for _ in 0..num_named_blocks {
             let index = u32::read_be(reader.by_ref())?;
             let len = u8::read_be(reader.by_ref())? as usize;
@@ -70,11 +70,13 @@ impl BigEndianIo for NamedBlocks {
                 name.truncate(i);
             };
             let name = CString::new(name).map_err(|_| ErrorKind::InvalidData)?;
-            blocks.push((name, index));
+            blocks.insert(name, index);
         }
         Ok(Self { blocks })
     }
+}
 
+impl BigEndianWrite for NamedBlocks {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let num_named_blocks = self.blocks.len() as u32;
         num_named_blocks.write_be(writer.by_ref())?;

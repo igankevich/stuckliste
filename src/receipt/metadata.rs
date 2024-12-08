@@ -17,28 +17,51 @@ use crate::receipt::BomInfo;
 use crate::receipt::Context;
 use crate::receipt::CrcReader;
 use crate::receipt::EntryType;
+use crate::receipt::FatBinary;
 use crate::receipt::FileType;
-use crate::BigEndianIo;
-use crate::BlockIo;
+use crate::receipt::MachObject;
+use crate::BigEndianRead;
+use crate::BigEndianWrite;
+use crate::BlockRead;
+use crate::BlockWrite;
 use crate::Blocks;
 
+/// File metadata.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum Metadata {
+    /// Regular file.
     File(File),
+
+    /// Executable file.
+    ///
+    /// This includes regular binaries and universal (fat) binaries.
     Executable(Executable),
+
+    /// A directory.
     Directory(Directory),
+
+    /// Symbolic link.
     Link(Link),
+
+    /// Character or block device.
     Device(Device),
+
+    /// Any file.
+    ///
+    /// This is a catch-all variant for path-only BOM files.
     Entry(Entry),
 }
 
 impl Metadata {
+    /// Get the file type from file mode.
+    ///
+    /// Unsupported file types are coerced to [`FileType::Regular].
     pub fn file_type(&self) -> FileType {
-        // TODO error ???
         FileType::new(self.mode()).unwrap_or(FileType::Regular)
     }
 
+    /// Get entry type.
     pub fn entry_type(&self) -> EntryType {
         use Metadata::*;
         match self {
@@ -50,22 +73,27 @@ impl Metadata {
         }
     }
 
+    /// Get file mode.
     pub fn mode(&self) -> u16 {
         get_common_field!(self, mode, 0)
     }
 
+    /// Get file owner's user id.
     pub fn uid(&self) -> u32 {
         get_common_field!(self, uid, 0)
     }
 
+    /// Get file owner's group id.
     pub fn gid(&self) -> u32 {
         get_common_field!(self, gid, 0)
     }
 
+    /// Get file's last modification time.
     pub fn mtime(&self) -> u32 {
         get_common_field!(self, mtime, 0)
     }
 
+    /// Get file size.
     pub fn size(&self) -> u64 {
         get_common_field!(self, size, 0)
     }
@@ -74,7 +102,7 @@ impl Metadata {
         set_common_field!(self, size, value);
     }
 
-    /// Last modification time.
+    /// Get file's last modification time.
     pub fn modified(&self) -> Result<SystemTime, Error> {
         let dt = Duration::from_secs(self.mtime().into());
         SystemTime::UNIX_EPOCH
@@ -82,6 +110,9 @@ impl Metadata {
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "out of range timestamp"))
     }
 
+    /// Get checksum.
+    ///
+    /// Returns zero for `Driectory`, `Device` and `Entry` variants.
     pub fn checksum(&self) -> u32 {
         match self {
             Metadata::File(File { checksum, .. }) => *checksum,
@@ -93,7 +124,8 @@ impl Metadata {
         }
     }
 
-    pub fn from_path(path: &Path, path_only: bool) -> Result<Self, Error> {
+    /// Create metadata from the provided file path.
+    pub fn new(path: &Path, path_only: bool) -> Result<Self, Error> {
         let metadata = std::fs::symlink_metadata(path)?;
         if path_only {
             return Ok(Self::Entry(Entry {
@@ -109,17 +141,63 @@ impl Metadata {
                 *checksum = crc_reader.digest()?;
             }
             Metadata::Link(Link {
-                ref mut name,
+                ref mut target,
                 ref mut checksum,
                 ..
             }) => {
-                *name = read_link(path)?;
-                let crc_reader = CrcReader::new(name.as_os_str().as_bytes());
+                *target = read_link(path)?;
+                let crc_reader = CrcReader::new(target.as_os_str().as_bytes());
                 *checksum = crc_reader.digest()?;
             }
             _ => {}
         }
+        if let Metadata::File(File {
+            ref common,
+            ref checksum,
+            ..
+        }) = metadata
+        {
+            let mut file = std::fs::File::open(path)?;
+            let (arches, kind) = match FatBinary::read_be(&mut file) {
+                Ok(fat) => (fat.to_executable_arches(file)?, ExecutableType::Fat),
+                Err(_) => {
+                    file.rewind()?;
+                    let arches = match MachObject::read_be(file) {
+                        Ok(mach) => {
+                            let mut arch: ExecutableArch = mach.into();
+                            // This value overflows for files larger than 4 GiB.
+                            arch.size = common.size as u32;
+                            arch.checksum = *checksum;
+                            vec![arch]
+                        }
+                        Err(_) => Default::default(),
+                    };
+                    (arches, ExecutableType::Mach)
+                }
+            };
+            if !arches.is_empty() {
+                let file = match metadata {
+                    Metadata::File(file) => file,
+                    // we matched on File above
+                    _ => unreachable!(),
+                };
+                metadata = Metadata::Executable(Executable {
+                    common: file.common,
+                    checksum: file.checksum,
+                    arches,
+                    kind,
+                });
+            }
+        }
         Ok(metadata)
+    }
+
+    /// Get binary type.
+    pub fn executable_type(&self) -> Option<ExecutableType> {
+        match self {
+            Metadata::Executable(exe) => Some(exe.kind()),
+            _ => None,
+        }
     }
 
     fn flags(&self) -> u16 {
@@ -130,18 +208,8 @@ impl Metadata {
             Metadata::Entry { .. } => 0_u16,
             _ => 0xf_u16,
         };
-        let binary_type = match self {
-            Metadata::Executable(Executable { ref arches, .. }) => {
-                // TODO this probably depends on file magic, not on the number of arches
-                if arches.len() == 1 {
-                    BinaryType::Executable as u16
-                } else {
-                    BinaryType::Fat as u16
-                }
-            }
-            _ => BinaryType::Unknown as u16,
-        };
-        ((binary_type & 0xf) << 12) | (path_only & 0xf)
+        let executable_type = self.executable_type().map(|x| x as u16).unwrap_or(0_u16);
+        ((executable_type & 0xf) << 12) | (path_only & 0xf)
     }
 
     pub(crate) fn accumulate(&self, stats: &mut BomInfo) {
@@ -166,7 +234,7 @@ impl Metadata {
             let metadata = Self::Entry(Entry { entry_type });
             return Ok(metadata);
         }
-        let binary_type = get_binary_type(flags);
+        let executable_type = get_executable_type(flags);
         let common = Common::read_be(reader.by_ref())?;
         let file_type = FileType::new(common.mode)?;
         debug_assert!(
@@ -175,8 +243,8 @@ impl Metadata {
             entry_type,
             file_type
         );
-        let metadata = match file_type {
-            FileType::Regular if binary_type != BinaryType::Unknown => {
+        let metadata = match (file_type, executable_type) {
+            (FileType::Regular, Some(executable_type)) => {
                 let checksum = u32::read_be(reader.by_ref())?;
                 let flag = u8::read_be(reader.by_ref())?;
                 debug_assert!(flag == 1, "flag = {flag}");
@@ -185,53 +253,67 @@ impl Metadata {
                 for _ in 0..num_arch_again {
                     arches.push(ExecutableArch::read_be(reader.by_ref())?);
                 }
+                debug_assert!(
+                    (executable_type == ExecutableType::Fat && !arches.is_empty())
+                        || (executable_type == ExecutableType::Mach && arches.len() == 1),
+                    "unexpected executable type and arches combination: type = {:?}, arches = {:?}",
+                    executable_type,
+                    arches
+                );
                 Metadata::Executable(Executable {
                     common,
                     checksum,
                     arches,
+                    kind: executable_type,
                 })
             }
-            FileType::Regular => {
+            (FileType::Regular, executable_type) => {
                 debug_assert!(
-                    binary_type == BinaryType::Unknown,
-                    "unexpected binary type {:?}",
-                    binary_type
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
                 );
                 let checksum = u32::read_be(reader.by_ref())?;
                 Metadata::File(File { common, checksum })
             }
-            FileType::Directory => {
+            (FileType::Directory, executable_type) => {
                 debug_assert!(
-                    binary_type == BinaryType::Unknown,
-                    "unexpected binary type {:?}",
-                    binary_type
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
                 );
                 Metadata::Directory(Directory { common })
             }
-            FileType::Symlink => {
-                let checksum = u32::read_be(reader.by_ref())?;
-                let name_len = u32::read_be(reader.by_ref())?;
+            (FileType::Symlink, executable_type) => {
                 debug_assert!(
-                    name_len == 0 || file_type == FileType::Symlink,
-                    "file_type = {:?}, name_len = {}",
-                    file_type,
-                    name_len
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
                 );
-                let mut name = vec![0_u8; name_len as usize];
-                reader.read_exact(&mut name[..])?;
-                let name = CString::from_vec_with_nul(name).map_err(Error::other)?;
-                let name = OsStr::from_bytes(name.to_bytes());
+                let checksum = u32::read_be(reader.by_ref())?;
+                let target_len = u32::read_be(reader.by_ref())?;
+                debug_assert!(
+                    target_len == 0 || file_type == FileType::Symlink,
+                    "file_type = {:?}, target_len = {}",
+                    file_type,
+                    target_len
+                );
+                let mut target = vec![0_u8; target_len as usize];
+                reader.read_exact(&mut target[..])?;
+                let target = CString::from_vec_with_nul(target)
+                    .map_err(|_| Error::other("invalid c-string"))?;
+                let target = OsStr::from_bytes(target.to_bytes());
                 Metadata::Link(Link {
                     common,
                     checksum,
-                    name: name.into(),
+                    target: target.into(),
                 })
             }
-            FileType::CharDevice | FileType::BlockDevice => {
+            (FileType::CharDevice | FileType::BlockDevice, executable_type) => {
                 debug_assert!(
-                    binary_type == BinaryType::Unknown,
-                    "unexpected binary type {:?}",
-                    binary_type
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
                 );
                 let dev = u32::read_be(reader.by_ref())?;
                 Metadata::Device(Device {
@@ -258,6 +340,7 @@ impl Metadata {
                 common,
                 checksum,
                 arches,
+                kind: _kind,
             }) => {
                 common.write_be(writer.by_ref())?;
                 checksum.write_be(writer.by_ref())?;
@@ -274,11 +357,11 @@ impl Metadata {
             Metadata::Link(Link {
                 common,
                 checksum,
-                name,
+                target,
             }) => {
                 common.write_be(writer.by_ref())?;
                 checksum.write_be(writer.by_ref())?;
-                let name_bytes = name.as_os_str().as_bytes();
+                let name_bytes = target.as_os_str().as_bytes();
                 // +1 because of the nul byte
                 ((name_bytes.len() + 1) as u32).write_be(writer.by_ref())?;
                 writer.write_all(name_bytes)?;
@@ -298,7 +381,7 @@ impl Metadata {
     }
 }
 
-impl BlockIo<Context> for Metadata {
+impl BlockRead<Context> for Metadata {
     fn read_block(
         i: u32,
         file: &[u8],
@@ -309,14 +392,16 @@ impl BlockIo<Context> for Metadata {
         let block_len = reader.len();
         let mut cursor = Cursor::new(reader);
         let mut metadata = Self::read(cursor.by_ref())?;
-        if let Some(size) = context.file_size_64.get(&i) {
+        if let Some(size) = context.file_sizes.get(&i) {
             metadata.set_size(*size);
         }
         let unread_bytes = block_len - reader.len();
         debug_assert!(unread_bytes == 0, "unread_bytes = {unread_bytes}");
         Ok(metadata)
     }
+}
 
+impl BlockWrite<Context> for Metadata {
     fn write_block<W: Write + Seek>(
         &self,
         mut writer: W,
@@ -326,7 +411,7 @@ impl BlockIo<Context> for Metadata {
         let i = blocks.append(writer.by_ref(), |writer| self.write(writer))?;
         let file_size = self.size();
         if file_size > u32::MAX as u64 {
-            context.file_size_64.insert(i, file_size);
+            context.file_sizes.insert(i, file_size);
         }
         Ok(i)
     }
@@ -353,7 +438,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
             FileType::Symlink => Metadata::Link(Link {
                 common,
                 checksum: 0,
-                name: Default::default(),
+                target: Default::default(),
             }),
             FileType::CharDevice | FileType::BlockDevice => Metadata::Device(Device {
                 common,
@@ -364,6 +449,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
     }
 }
 
+/// File entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct File {
@@ -372,6 +458,7 @@ pub struct File {
 }
 
 impl File {
+    /// Get checksum.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
@@ -379,23 +466,36 @@ impl File {
 
 impl_common!(File);
 
+/// Executable entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Executable {
     common: Common,
     checksum: u32,
     arches: Vec<ExecutableArch>,
+    kind: ExecutableType,
 }
 
 impl Executable {
+    /// Get checksum.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
 
+    /// Get executable type.
+    pub fn kind(&self) -> ExecutableType {
+        self.kind
+    }
+
+    /// Get all architectures this executable was compiled for.
+    ///
+    /// For regular binaries returns only one architecture.
+    /// For fat binaries returns all architectures.
     pub fn arches(&self) -> &[ExecutableArch] {
         &self.arches[..]
     }
 
+    /// Transoform into a vector of architectures.
     pub fn into_arches(self) -> Vec<ExecutableArch> {
         self.arches
     }
@@ -403,6 +503,7 @@ impl Executable {
 
 impl_common!(Executable);
 
+/// Directory entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Directory {
@@ -411,30 +512,35 @@ pub struct Directory {
 
 impl_common!(Directory);
 
+/// Symbolic link entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Link {
     common: Common,
     checksum: u32,
-    name: PathBuf,
+    target: PathBuf,
 }
 
 impl Link {
+    /// Get checksum of the target file path.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
 
-    pub fn name(&self) -> &Path {
-        &self.name
+    /// Get target path.
+    pub fn target(&self) -> &Path {
+        &self.target
     }
 
-    pub fn into_name(self) -> PathBuf {
-        self.name
+    /// Transform into target path.
+    pub fn into_target(self) -> PathBuf {
+        self.target
     }
 }
 
 impl_common!(Link);
 
+/// Device entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Device {
@@ -443,6 +549,7 @@ pub struct Device {
 }
 
 impl Device {
+    /// Get platform-specific device number.
     pub fn rdev(&self) -> i32 {
         self.dev
     }
@@ -450,6 +557,9 @@ impl Device {
 
 impl_common!(Device);
 
+/// Any entry.
+///
+/// Stores only the entry type.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Entry {
@@ -457,40 +567,46 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// Get entry type.
     pub fn kind(&self) -> EntryType {
         self.entry_type
     }
 }
 
+/// Binary architecture information.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct ExecutableArch {
-    cpu_type: u32,
-    cpu_sub_type: u32,
+    pub(crate) cpu_type: u32,
+    pub(crate) cpu_sub_type: u32,
     // If the actual binary size is u64 then this field overflows.
-    size: u32,
-    checksum: u32,
+    pub(crate) size: u32,
+    pub(crate) checksum: u32,
 }
 
 impl ExecutableArch {
+    /// Get CPU type as defined in [`mach/machine.h`](https://github.com/opensource-apple/cctools/blob/master/include/mach/machine.h).
     pub fn cpu_type(&self) -> u32 {
         self.cpu_type
     }
 
+    /// Get CPU subtype as defined in [`mach/machine.h`](https://github.com/opensource-apple/cctools/blob/master/include/mach/machine.h).
     pub fn cpu_sub_type(&self) -> u32 {
         self.cpu_sub_type
     }
 
+    /// Get file size.
     pub fn size(&self) -> u32 {
         self.size
     }
 
+    /// Get checksum.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
 }
 
-impl BigEndianIo for ExecutableArch {
+impl BigEndianRead for ExecutableArch {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let cpu_type = u32::read_be(reader.by_ref())?;
         let cpu_sub_type = u32::read_be(reader.by_ref())?;
@@ -503,7 +619,9 @@ impl BigEndianIo for ExecutableArch {
             checksum,
         })
     }
+}
 
+impl BigEndianWrite for ExecutableArch {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         self.cpu_type.write_be(writer.by_ref())?;
         self.cpu_sub_type.write_be(writer.by_ref())?;
@@ -513,27 +631,24 @@ impl BigEndianIo for ExecutableArch {
     }
 }
 
+/// Executable file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
-pub enum BinaryType {
-    /// Regular file.
-    Unknown = 0,
-    /// Single-architecture executable file.
-    Executable = 1,
-    /// Multiple-architectures executable file (universal binary).
+pub enum ExecutableType {
+    /// Mach object file.
+    Mach = 1,
+    /// Universal binary file.
     Fat = 2,
 }
 
-fn get_binary_type(flags: u16) -> BinaryType {
-    const UNKNOWN: u8 = BinaryType::Unknown as u8;
-    const EXECUTABLE: u8 = BinaryType::Executable as u8;
-    const FAT: u8 = BinaryType::Fat as u8;
+fn get_executable_type(flags: u16) -> Option<ExecutableType> {
+    const MACH: u8 = ExecutableType::Mach as u8;
+    const FAT: u8 = ExecutableType::Fat as u8;
     match ((flags >> 12) & 0xf) as u8 {
-        UNKNOWN => BinaryType::Unknown,
-        EXECUTABLE => BinaryType::Executable,
-        FAT => BinaryType::Fat,
-        _ => BinaryType::Unknown,
+        MACH => Some(ExecutableType::Mach),
+        FAT => Some(ExecutableType::Fat),
+        _ => None,
     }
 }
 
@@ -547,7 +662,7 @@ struct Common {
     size: u64,
 }
 
-impl BigEndianIo for Common {
+impl BigEndianRead for Common {
     fn read_be<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mode = u16::read_be(reader.by_ref())?;
         let uid = u32::read_be(reader.by_ref())?;
@@ -564,7 +679,9 @@ impl BigEndianIo for Common {
             size: size as u64,
         })
     }
+}
 
+impl BigEndianWrite for Common {
     fn write_be<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         self.mode.write_be(writer.by_ref())?;
         self.uid.write_be(writer.by_ref())?;
@@ -615,22 +732,27 @@ use set_common_field;
 macro_rules! impl_common {
     ($type:ty) => {
         impl $type {
+            /// Get file mode.
             pub fn mode(&self) -> u16 {
                 self.common.mode
             }
 
+            /// Get file owner's user id.
             pub fn uid(&self) -> u32 {
                 self.common.uid
             }
 
+            /// Get file owner's group id.
             pub fn gid(&self) -> u32 {
                 self.common.gid
             }
 
+            /// Get file's last modification time.
             pub fn mtime(&self) -> u32 {
                 self.common.mtime
             }
 
+            /// Get file size.
             pub fn size(&self) -> u64 {
                 self.common.size
             }
@@ -655,16 +777,6 @@ mod tests {
         test_be_io_symmetry::<ExecutableArch>();
     }
 
-    //impl<'a> Arbitrary<'a> for Metadata {
-    //    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-    //        let mut metadata: Metadata = u.arbitrary()?;
-    //        // make file mode correspond to entry type
-    //        let file_type = to_file_type(metadata.entry_type());
-    //        metadata.set_mode(u.int_in_range(0_u16..=0o7777_u16)? | file_type.to_mode_bits());
-    //        Ok(metadata)
-    //    }
-    //}
-
     impl<'a> Arbitrary<'a> for File {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let mut common: Common = u.arbitrary()?;
@@ -680,8 +792,12 @@ mod tests {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let mut common: Common = u.arbitrary()?;
             common.mode = FileType::Regular.set(common.mode);
+            let kind: ExecutableType = u.arbitrary()?;
             let mut arches = Vec::new();
-            let num_arches = u.int_in_range(1..=0xf)?;
+            let num_arches = match kind {
+                ExecutableType::Fat => u.int_in_range(1..=0xf)?,
+                ExecutableType::Mach => 1,
+            };
             for _ in 0..num_arches {
                 arches.push(u.arbitrary()?);
             }
@@ -689,6 +805,7 @@ mod tests {
                 common,
                 checksum: u.arbitrary()?,
                 arches,
+                kind,
             })
         }
     }
@@ -719,7 +836,7 @@ mod tests {
             Ok(Self {
                 common,
                 checksum: u.arbitrary()?,
-                name: OsStr::from_bytes(u.arbitrary::<CString>()?.to_bytes()).into(),
+                target: OsStr::from_bytes(u.arbitrary::<CString>()?.to_bytes()).into(),
             })
         }
     }
