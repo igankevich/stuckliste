@@ -158,20 +158,21 @@ impl Metadata {
         }) = metadata
         {
             let mut file = std::fs::File::open(path)?;
-            let (arches, is_fat) = match FatBinary::read_be(&mut file) {
-                Ok(fat) => (fat.to_executable_arches(file)?, true),
+            let (arches, kind) = match FatBinary::read_be(&mut file) {
+                Ok(fat) => (fat.to_executable_arches(file)?, ExecutableType::Fat),
                 Err(_) => {
                     file.rewind()?;
-                    match MachObject::read_be(file) {
+                    let arches = match MachObject::read_be(file) {
                         Ok(mach) => {
                             let mut arch: ExecutableArch = mach.into();
                             // This value overflows for files larger than 4 GiB.
                             arch.size = common.size as u32;
                             arch.checksum = *checksum;
-                            (vec![arch], false)
+                            vec![arch]
                         }
-                        Err(_) => (Default::default(), false),
-                    }
+                        Err(_) => Default::default(),
+                    };
+                    (arches, ExecutableType::Mach)
                 }
             };
             if !arches.is_empty() {
@@ -184,7 +185,7 @@ impl Metadata {
                     common: file.common,
                     checksum: file.checksum,
                     arches,
-                    is_fat,
+                    kind,
                 });
             }
         }
@@ -192,7 +193,7 @@ impl Metadata {
     }
 
     /// Get binary type.
-    pub fn binary_type(&self) -> Option<BinaryType> {
+    pub fn executable_type(&self) -> Option<ExecutableType> {
         match self {
             Metadata::Executable(exe) => Some(exe.kind()),
             _ => None,
@@ -207,8 +208,8 @@ impl Metadata {
             Metadata::Entry { .. } => 0_u16,
             _ => 0xf_u16,
         };
-        let binary_type = self.binary_type().map(|x| x as u16).unwrap_or(0_u16);
-        ((binary_type & 0xf) << 12) | (path_only & 0xf)
+        let executable_type = self.executable_type().map(|x| x as u16).unwrap_or(0_u16);
+        ((executable_type & 0xf) << 12) | (path_only & 0xf)
     }
 
     pub(crate) fn accumulate(&self, stats: &mut BomInfo) {
@@ -233,7 +234,7 @@ impl Metadata {
             let metadata = Self::Entry(Entry { entry_type });
             return Ok(metadata);
         }
-        let binary_type = get_binary_type(flags);
+        let executable_type = get_executable_type(flags);
         let common = Common::read_be(reader.by_ref())?;
         let file_type = FileType::new(common.mode)?;
         debug_assert!(
@@ -242,8 +243,8 @@ impl Metadata {
             entry_type,
             file_type
         );
-        let metadata = match file_type {
-            FileType::Regular if binary_type.is_some() => {
+        let metadata = match (file_type, executable_type) {
+            (FileType::Regular, Some(executable_type)) => {
                 let checksum = u32::read_be(reader.by_ref())?;
                 let flag = u8::read_be(reader.by_ref())?;
                 debug_assert!(flag == 1, "flag = {flag}");
@@ -252,31 +253,43 @@ impl Metadata {
                 for _ in 0..num_arch_again {
                     arches.push(ExecutableArch::read_be(reader.by_ref())?);
                 }
+                debug_assert!(
+                    (executable_type == ExecutableType::Fat && !arches.is_empty())
+                        || (executable_type == ExecutableType::Mach && arches.len() == 1),
+                    "unexpected executable type and arches combination: type = {:?}, arches = {:?}",
+                    executable_type,
+                    arches
+                );
                 Metadata::Executable(Executable {
                     common,
                     checksum,
                     arches,
-                    is_fat: binary_type == Some(BinaryType::Fat),
+                    kind: executable_type,
                 })
             }
-            FileType::Regular => {
+            (FileType::Regular, executable_type) => {
                 debug_assert!(
-                    binary_type.is_none(),
-                    "unexpected binary type {:?}",
-                    binary_type
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
                 );
                 let checksum = u32::read_be(reader.by_ref())?;
                 Metadata::File(File { common, checksum })
             }
-            FileType::Directory => {
+            (FileType::Directory, executable_type) => {
                 debug_assert!(
-                    binary_type.is_none(),
-                    "unexpected binary type {:?}",
-                    binary_type
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
                 );
                 Metadata::Directory(Directory { common })
             }
-            FileType::Symlink => {
+            (FileType::Symlink, executable_type) => {
+                debug_assert!(
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
+                );
                 let checksum = u32::read_be(reader.by_ref())?;
                 let target_len = u32::read_be(reader.by_ref())?;
                 debug_assert!(
@@ -296,11 +309,11 @@ impl Metadata {
                     target: target.into(),
                 })
             }
-            FileType::CharDevice | FileType::BlockDevice => {
+            (FileType::CharDevice | FileType::BlockDevice, executable_type) => {
                 debug_assert!(
-                    binary_type.is_none(),
-                    "unexpected binary type {:?}",
-                    binary_type
+                    executable_type.is_none(),
+                    "unexpected executable type {:?}",
+                    executable_type
                 );
                 let dev = u32::read_be(reader.by_ref())?;
                 Metadata::Device(Device {
@@ -327,7 +340,7 @@ impl Metadata {
                 common,
                 checksum,
                 arches,
-                is_fat: _is_fat,
+                kind: _kind,
             }) => {
                 common.write_be(writer.by_ref())?;
                 checksum.write_be(writer.by_ref())?;
@@ -460,7 +473,7 @@ pub struct Executable {
     common: Common,
     checksum: u32,
     arches: Vec<ExecutableArch>,
-    is_fat: bool,
+    kind: ExecutableType,
 }
 
 impl Executable {
@@ -469,18 +482,9 @@ impl Executable {
         self.checksum
     }
 
-    /// Is this a fat binary?
-    pub fn is_fat(&self) -> bool {
-        self.is_fat
-    }
-
     /// Get executable type.
-    pub fn kind(&self) -> BinaryType {
-        if self.is_fat {
-            BinaryType::Fat
-        } else {
-            BinaryType::Mach
-        }
+    pub fn kind(&self) -> ExecutableType {
+        self.kind
     }
 
     /// Get all architectures this executable was compiled for.
@@ -627,23 +631,23 @@ impl BigEndianWrite for ExecutableArch {
     }
 }
 
-/// Binary file type.
+/// Executable file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
-pub enum BinaryType {
+pub enum ExecutableType {
     /// Mach object file.
     Mach = 1,
     /// Universal binary file.
     Fat = 2,
 }
 
-fn get_binary_type(flags: u16) -> Option<BinaryType> {
-    const MACH: u8 = BinaryType::Mach as u8;
-    const FAT: u8 = BinaryType::Fat as u8;
+fn get_executable_type(flags: u16) -> Option<ExecutableType> {
+    const MACH: u8 = ExecutableType::Mach as u8;
+    const FAT: u8 = ExecutableType::Fat as u8;
     match ((flags >> 12) & 0xf) as u8 {
-        MACH => Some(BinaryType::Mach),
-        FAT => Some(BinaryType::Fat),
+        MACH => Some(ExecutableType::Mach),
+        FAT => Some(ExecutableType::Fat),
         _ => None,
     }
 }
@@ -788,8 +792,12 @@ mod tests {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let mut common: Common = u.arbitrary()?;
             common.mode = FileType::Regular.set(common.mode);
+            let kind: ExecutableType = u.arbitrary()?;
             let mut arches = Vec::new();
-            let num_arches = u.int_in_range(1..=0xf)?;
+            let num_arches = match kind {
+                ExecutableType::Fat => u.int_in_range(1..=0xf)?,
+                ExecutableType::Mach => 1,
+            };
             for _ in 0..num_arches {
                 arches.push(u.arbitrary()?);
             }
@@ -797,7 +805,7 @@ mod tests {
                 common,
                 checksum: u.arbitrary()?,
                 arches,
-                is_fat: u.arbitrary()?,
+                kind,
             })
         }
     }
