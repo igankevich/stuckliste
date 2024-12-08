@@ -192,10 +192,10 @@ impl Metadata {
     }
 
     /// Get binary type.
-    pub fn binary_type(&self) -> BinaryType {
+    pub fn binary_type(&self) -> Option<BinaryType> {
         match self {
-            Metadata::Executable(exe) => exe.kind(),
-            _ => BinaryType::Unknown,
+            Metadata::Executable(exe) => Some(exe.kind()),
+            _ => None,
         }
     }
 
@@ -207,7 +207,7 @@ impl Metadata {
             Metadata::Entry { .. } => 0_u16,
             _ => 0xf_u16,
         };
-        let binary_type = self.binary_type() as u16;
+        let binary_type = self.binary_type().map(|x| x as u16).unwrap_or(0_u16);
         ((binary_type & 0xf) << 12) | (path_only & 0xf)
     }
 
@@ -243,7 +243,7 @@ impl Metadata {
             file_type
         );
         let metadata = match file_type {
-            FileType::Regular if binary_type != BinaryType::Unknown => {
+            FileType::Regular if binary_type.is_some() => {
                 let checksum = u32::read_be(reader.by_ref())?;
                 let flag = u8::read_be(reader.by_ref())?;
                 debug_assert!(flag == 1, "flag = {flag}");
@@ -256,12 +256,12 @@ impl Metadata {
                     common,
                     checksum,
                     arches,
-                    is_fat: binary_type == BinaryType::Fat,
+                    is_fat: binary_type == Some(BinaryType::Fat),
                 })
             }
             FileType::Regular => {
                 debug_assert!(
-                    binary_type == BinaryType::Unknown,
+                    binary_type.is_none(),
                     "unexpected binary type {:?}",
                     binary_type
                 );
@@ -270,7 +270,7 @@ impl Metadata {
             }
             FileType::Directory => {
                 debug_assert!(
-                    binary_type == BinaryType::Unknown,
+                    binary_type.is_none(),
                     "unexpected binary type {:?}",
                     binary_type
                 );
@@ -297,7 +297,7 @@ impl Metadata {
             }
             FileType::CharDevice | FileType::BlockDevice => {
                 debug_assert!(
-                    binary_type == BinaryType::Unknown,
+                    binary_type.is_none(),
                     "unexpected binary type {:?}",
                     binary_type
                 );
@@ -631,23 +631,19 @@ impl BigEndianWrite for ExecutableArch {
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
 pub enum BinaryType {
-    /// Regular file.
-    Unknown = 0,
     /// Mach object file.
     Mach = 1,
     /// Universal binary file.
     Fat = 2,
 }
 
-fn get_binary_type(flags: u16) -> BinaryType {
-    const UNKNOWN: u8 = BinaryType::Unknown as u8;
+fn get_binary_type(flags: u16) -> Option<BinaryType> {
     const MACH: u8 = BinaryType::Mach as u8;
     const FAT: u8 = BinaryType::Fat as u8;
     match ((flags >> 12) & 0xf) as u8 {
-        UNKNOWN => BinaryType::Unknown,
-        MACH => BinaryType::Mach,
-        FAT => BinaryType::Fat,
-        _ => BinaryType::Unknown,
+        MACH => Some(BinaryType::Mach),
+        FAT => Some(BinaryType::Fat),
+        _ => None,
     }
 }
 
