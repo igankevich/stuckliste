@@ -16,7 +16,7 @@ include = ["**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
 bitflags = "2.6.0"
 chrono = "0.4.38"
 clap = { version = "4.5.21", features = ["std", "derive", "error-context", "help", "usage"], default-features = false }
-stuckliste.workspace = true
+stuckliste = { path = ".." }
 tempfile = "3.14.0"
 test_bin = "0.4.0"
 
