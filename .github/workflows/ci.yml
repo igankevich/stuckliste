@@ -75,6 +75,7 @@ jobs:
     needs: [ubuntu, macos]
     permissions:
       contents: write
+      packages: read
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/igankevich/stuckliste-ci:latest
