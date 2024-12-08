@@ -14,7 +14,7 @@ rm -rf --one-file-system release
 release_dir=release/"$version"
 mkdir -p "$release_dir"/"$target"
 for filename in lsbom mkbom; do
-    cp -vn target/"$target"/release/"$filename" release/"$target"/
+    cp -vn target/"$target"/release/"$filename" "$release_dir"/"$target"/
 done
 cd release
 find . -type f -print0 >"$workdir"/files
