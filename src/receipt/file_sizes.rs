@@ -19,6 +19,7 @@ pub struct FileSizes64(HashMap<u32, u64>);
 impl FileSizes64 {
     const BLOCK_LEN: usize = 128;
 
+    /// Transform into inner representation.
     pub fn into_inner(self) -> HashMap<u32, u64> {
         self.0
     }

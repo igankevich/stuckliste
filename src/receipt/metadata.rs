@@ -24,23 +24,41 @@ use crate::BlockRead;
 use crate::BlockWrite;
 use crate::Blocks;
 
+/// File metadata.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub enum Metadata {
+    /// Regular file.
     File(File),
+
+    /// Executable file.
+    ///
+    /// This includes regular binaries and universal (fat) binaries.
     Executable(Executable),
+
+    /// A directory.
     Directory(Directory),
+
+    /// Symbolic link.
     Link(Link),
+
+    /// Character or block device.
     Device(Device),
+
+    /// Any file.
+    ///
+    /// This is a catch-all variant for path-only BOM files.
     Entry(Entry),
 }
 
 impl Metadata {
+    /// Get file type from file mode.
     pub fn file_type(&self) -> FileType {
         // TODO error ???
         FileType::new(self.mode()).unwrap_or(FileType::Regular)
     }
 
+    /// Get entry type.
     pub fn entry_type(&self) -> EntryType {
         use Metadata::*;
         match self {
@@ -52,22 +70,27 @@ impl Metadata {
         }
     }
 
+    /// Get file mode.
     pub fn mode(&self) -> u16 {
         get_common_field!(self, mode, 0)
     }
 
+    /// Get file owner's user id.
     pub fn uid(&self) -> u32 {
         get_common_field!(self, uid, 0)
     }
 
+    /// Get file owner's group id.
     pub fn gid(&self) -> u32 {
         get_common_field!(self, gid, 0)
     }
 
+    /// Get file's last modification time.
     pub fn mtime(&self) -> u32 {
         get_common_field!(self, mtime, 0)
     }
 
+    /// Get file size.
     pub fn size(&self) -> u64 {
         get_common_field!(self, size, 0)
     }
@@ -76,7 +99,7 @@ impl Metadata {
         set_common_field!(self, size, value);
     }
 
-    /// Last modification time.
+    /// Get file's last modification time.
     pub fn modified(&self) -> Result<SystemTime, Error> {
         let dt = Duration::from_secs(self.mtime().into());
         SystemTime::UNIX_EPOCH
@@ -84,6 +107,9 @@ impl Metadata {
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "out of range timestamp"))
     }
 
+    /// Get checksum.
+    ///
+    /// Returns zero for `Driectory`, `Device` and `Entry` variants.
     pub fn checksum(&self) -> u32 {
         match self {
             Metadata::File(File { checksum, .. }) => *checksum,
@@ -95,6 +121,7 @@ impl Metadata {
         }
     }
 
+    /// Create metadata from the provided file path.
     pub fn from_path(path: &Path, path_only: bool) -> Result<Self, Error> {
         let metadata = std::fs::symlink_metadata(path)?;
         if path_only {
@@ -124,6 +151,21 @@ impl Metadata {
         Ok(metadata)
     }
 
+    /// Get binary type.
+    pub fn binary_type(&self) -> BinaryType {
+        match self {
+            Metadata::Executable(Executable { ref arches, .. }) => {
+                // TODO this probably depends on file magic, not on the number of arches
+                if arches.len() == 1 {
+                    BinaryType::Executable
+                } else {
+                    BinaryType::Fat
+                }
+            }
+            _ => BinaryType::Unknown,
+        }
+    }
+
     fn flags(&self) -> u16 {
         // flags 0xN00P
         // N - no. of architectures in a fat binary
@@ -132,17 +174,7 @@ impl Metadata {
             Metadata::Entry { .. } => 0_u16,
             _ => 0xf_u16,
         };
-        let binary_type = match self {
-            Metadata::Executable(Executable { ref arches, .. }) => {
-                // TODO this probably depends on file magic, not on the number of arches
-                if arches.len() == 1 {
-                    BinaryType::Executable as u16
-                } else {
-                    BinaryType::Fat as u16
-                }
-            }
-            _ => BinaryType::Unknown as u16,
-        };
+        let binary_type = self.binary_type() as u16;
         ((binary_type & 0xf) << 12) | (path_only & 0xf)
     }
 
@@ -368,6 +400,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
     }
 }
 
+/// File entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct File {
@@ -376,6 +409,7 @@ pub struct File {
 }
 
 impl File {
+    /// Get checksum.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
@@ -383,6 +417,7 @@ impl File {
 
 impl_common!(File);
 
+/// Executable entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Executable {
@@ -392,14 +427,20 @@ pub struct Executable {
 }
 
 impl Executable {
+    /// Get checksum.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
 
+    /// Get all architectures this executable was compiled for.
+    ///
+    /// For regular binaries returns only one architecture.
+    /// For fat binaries returns all architectures.
     pub fn arches(&self) -> &[ExecutableArch] {
         &self.arches[..]
     }
 
+    /// Transoform into a vector of architectures.
     pub fn into_arches(self) -> Vec<ExecutableArch> {
         self.arches
     }
@@ -407,6 +448,7 @@ impl Executable {
 
 impl_common!(Executable);
 
+/// Directory entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Directory {
@@ -415,6 +457,7 @@ pub struct Directory {
 
 impl_common!(Directory);
 
+/// Symbolic link entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Link {
@@ -424,14 +467,17 @@ pub struct Link {
 }
 
 impl Link {
+    /// Get checksum of the target file path.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
 
+    /// Get target path.
     pub fn target(&self) -> &Path {
         &self.target
     }
 
+    /// Transform into target path.
     pub fn into_target(self) -> PathBuf {
         self.target
     }
@@ -439,6 +485,7 @@ impl Link {
 
 impl_common!(Link);
 
+/// Device entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Device {
@@ -447,6 +494,7 @@ pub struct Device {
 }
 
 impl Device {
+    /// Get platform-specific device number.
     pub fn rdev(&self) -> i32 {
         self.dev
     }
@@ -454,6 +502,9 @@ impl Device {
 
 impl_common!(Device);
 
+/// Any entry.
+///
+/// Stores only the entry type.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Entry {
@@ -461,11 +512,13 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// Get entry type.
     pub fn kind(&self) -> EntryType {
         self.entry_type
     }
 }
 
+/// Binary architecture information.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct ExecutableArch {
@@ -477,18 +530,22 @@ pub struct ExecutableArch {
 }
 
 impl ExecutableArch {
+    /// Get CPU type as defined in [`mach/machine.h`](https://github.com/opensource-apple/cctools/blob/master/include/mach/machine.h).
     pub fn cpu_type(&self) -> u32 {
         self.cpu_type
     }
 
+    /// Get CPU subtype as defined in [`mach/machine.h`](https://github.com/opensource-apple/cctools/blob/master/include/mach/machine.h).
     pub fn cpu_sub_type(&self) -> u32 {
         self.cpu_sub_type
     }
 
+    /// Get file size.
     pub fn size(&self) -> u32 {
         self.size
     }
 
+    /// Get checksum.
     pub fn checksum(&self) -> u32 {
         self.checksum
     }
@@ -519,6 +576,7 @@ impl BigEndianWrite for ExecutableArch {
     }
 }
 
+/// Binary file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
@@ -623,22 +681,27 @@ use set_common_field;
 macro_rules! impl_common {
     ($type:ty) => {
         impl $type {
+            /// Get file mode.
             pub fn mode(&self) -> u16 {
                 self.common.mode
             }
 
+            /// Get file owner's user id.
             pub fn uid(&self) -> u32 {
                 self.common.uid
             }
 
+            /// Get file owner's group id.
             pub fn gid(&self) -> u32 {
                 self.common.gid
             }
 
+            /// Get file's last modification time.
             pub fn mtime(&self) -> u32 {
                 self.common.mtime
             }
 
+            /// Get file size.
             pub fn size(&self) -> u64 {
                 self.common.size
             }

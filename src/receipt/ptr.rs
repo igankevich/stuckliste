@@ -9,15 +9,20 @@ use crate::BlockRead;
 use crate::BlockWrite;
 use crate::Blocks;
 
+/// A pointer to a regular block.
+///
+/// A block that stores another block's index as `u32` value.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Ptr<T>(T);
 
 impl<T> Ptr<T> {
+    /// Create new pointer fomr the provided value.
     pub fn new(value: T) -> Self {
         Self(value)
     }
 
+    /// Transform into underlying value.
     pub fn into_inner(self) -> T {
         self.0
     }

@@ -6,6 +6,10 @@ use std::io::Write;
 use crate::BigEndianRead;
 use crate::BigEndianWrite;
 
+/// BOM-specific file type.
+///
+/// The same as UNIX-specific file type, but does not include named pipes (FIFOs) and sockets.
+/// File type is encoded as the last four bits of file mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
@@ -41,6 +45,10 @@ impl FileType {
         }
     }
 
+    /// Convert file type to the entry type.
+    ///
+    /// Entry type is another BOM-specific file type that encodes character devices
+    /// and block devices as a single value.
     pub fn to_entry_type(self) -> EntryType {
         use FileType::*;
         match self {
@@ -85,13 +93,20 @@ impl TryFrom<std::fs::FileType> for FileType {
     }
 }
 
+/// Bom-specific file type.
+///
+/// Same as [`FileType`] but encodes block devices and character devices as a single value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
 pub enum EntryType {
+    /// Regular file.
     File = 1,
+    /// A directory.
     Directory = 2,
+    /// Symbolic link.
     Link = 3,
+    /// Character device or block device.
     Device = 4,
 }
 

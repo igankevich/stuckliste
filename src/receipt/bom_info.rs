@@ -7,6 +7,9 @@ use crate::BigEndianRead;
 use crate::BigEndianWrite;
 
 /// File paths statistics.
+///
+/// This includes the total size for each binary architecture as well as total size of
+/// non-architecture-specific files. The counters overflow when the total size reaches 4 GiB.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct BomInfo {
@@ -19,17 +22,21 @@ pub struct BomInfo {
 impl BomInfo {
     const VERSION: u32 = 1;
 
-    pub fn new(tree: &PathComponentVec) -> Self {
+    /// Compute file statistics for the supplied file paths.
+    pub fn new(paths: &PathComponentVec) -> Self {
         let mut stats = Self {
             num_paths: 0,
             entries: Default::default(),
         };
-        for component in tree.iter() {
+        for component in paths.iter() {
             component.accumulate(&mut stats);
         }
         stats
     }
 
+    /// Add `file_size` bytes for `cpu_type` to the statistics.
+    ///
+    /// Use `cpu_type == 0` for non-architecture-specific files.
     pub fn accumulate(&mut self, cpu_type: u32, file_size: u32) {
         match self
             .entries

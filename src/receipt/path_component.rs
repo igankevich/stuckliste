@@ -28,8 +28,7 @@ use crate::Blocks;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-pub struct PathComponentKey {
-    /// Sequential number of the path in the tree.
+struct PathComponentKey {
     seq_no: u32,
     metadata: Metadata,
 }
@@ -70,7 +69,7 @@ impl BlockRead<Context> for PathComponentKey {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
-pub struct PathComponentValue {
+struct PathComponentValue {
     parent: u32,
     name: CString,
 }
@@ -108,26 +107,28 @@ impl BlockRead<Context> for PathComponentValue {
     }
 }
 
+/// Path component.
+///
+/// This can be a file name or a name of any parent directory.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct PathComponent {
-    seq_no: u32,
-    parent: u32,
-    metadata: Metadata,
-    name: CString,
+    /// Sequential number of the path in the tree.
+    pub seq_no: u32,
+    /// Parent path.
+    ///
+    /// Equals zero for paths with no parent.
+    pub parent: u32,
+    /// File metadata.
+    pub metadata: Metadata,
+    /// File name.
+    ///
+    /// This includes only the last component of the path.
+    pub name: CString,
 }
 
 impl PathComponent {
-    pub fn new(key: PathComponentKey, value: PathComponentValue) -> Self {
-        Self {
-            seq_no: key.seq_no,
-            metadata: key.metadata,
-            parent: value.parent,
-            name: value.name,
-        }
-    }
-
-    pub fn into_key_and_value(self) -> (PathComponentKey, PathComponentValue) {
+    fn into_key_and_value(self) -> (PathComponentKey, PathComponentValue) {
         let key = PathComponentKey {
             seq_no: self.seq_no,
             metadata: self.metadata.clone(),
@@ -144,6 +145,7 @@ impl PathComponent {
     }
 }
 
+/// A vector of path components.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct PathComponentVec {
@@ -153,6 +155,7 @@ pub struct PathComponentVec {
 impl PathComponentVec {
     const BLOCK_LEN: usize = 4096;
 
+    /// Create a new vector from the provided path components.
     pub fn new(components: Vec<PathComponent>) -> Self {
         Self { components }
     }
@@ -180,6 +183,7 @@ impl PathComponentVec {
         Ok(path)
     }
 
+    /// Transform into a vector of _(full-path, metadata)_ pairs.
     pub fn to_paths(&self) -> Result<Vec<(PathBuf, Metadata)>, Error> {
         let mut paths = Vec::new();
         for component in self.components.iter() {
@@ -191,6 +195,7 @@ impl PathComponentVec {
 
     // TODO hard links
     // TODO fat binaries, ordinary binaries
+    /// Create a vector by recursively scanning the provided directory.
     pub fn from_directory<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
@@ -267,7 +272,12 @@ impl BlockRead<Context> for PathComponentVec {
         let mut components: Vec<_> = tree
             .into_inner()
             .into_iter()
-            .map(|(k, v)| PathComponent::new(k, v))
+            .map(|(k, v)| PathComponent {
+                seq_no: k.seq_no,
+                metadata: k.metadata,
+                parent: v.parent,
+                name: v.name,
+            })
             .collect();
         components.sort_unstable_by(|a, b| a.seq_no.cmp(&b.seq_no));
         #[cfg(debug_assertions)]

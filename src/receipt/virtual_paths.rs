@@ -22,6 +22,7 @@ pub struct VirtualPathTree {
 impl VirtualPathTree {
     const VERSION: u32 = 1;
 
+    /// Create an empty tree.
     pub fn new() -> Self {
         Self {
             tree: Default::default(),

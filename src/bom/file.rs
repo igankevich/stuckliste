@@ -104,27 +104,28 @@ impl Bom {
     }
 
     /// Read BOM header from `file`.
-    pub fn read(mut file: &[u8]) -> Result<Self, Error> {
+    pub fn read(file: &[u8]) -> Result<Self, Error> {
+        let mut reader = file;
         let mut magic = [0_u8; BOM_MAGIC.len()];
-        file.read_exact(&mut magic[..])?;
+        reader.read_exact(&mut magic[..])?;
         if magic != BOM_MAGIC {
             return Err(Error::other("not a bom store"));
         }
-        let version = u32::read_be(file.by_ref())?;
+        let version = u32::read_be(reader.by_ref())?;
         if version != 1 {
             return Err(Error::other(format!(
                 "unsupported BOM store version: {}",
                 version
             )));
         }
-        let num_non_null_blocks = u32::read_be(file.by_ref())?;
+        let num_non_null_blocks = u32::read_be(reader.by_ref())?;
         let blocks = Block {
-            offset: u32::read_be(file.by_ref())?,
-            len: u32::read_be(file.by_ref())?,
+            offset: u32::read_be(reader.by_ref())?,
+            len: u32::read_be(reader.by_ref())?,
         };
         let named_blocks = Block {
-            offset: u32::read_be(file.by_ref())?,
-            len: u32::read_be(file.by_ref())?,
+            offset: u32::read_be(reader.by_ref())?,
+            len: u32::read_be(reader.by_ref())?,
         };
         let blocks = Blocks::read_be(blocks.slice(file))?;
         let named_blocks = NamedBlocks::read_be(named_blocks.slice(file))?;

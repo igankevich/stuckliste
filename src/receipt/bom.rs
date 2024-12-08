@@ -17,6 +17,7 @@ use crate::receipt::PathComponentVec;
 use crate::receipt::VirtualPathTree;
 use crate::Bom;
 
+/// Configuration for creating a receipt.
 pub struct ReceiptBuilder {
     paths_only: bool,
 }
@@ -46,6 +47,9 @@ impl Default for ReceiptBuilder {
     }
 }
 
+/// This is what is usually called a BOM file.
+///
+/// This file contains a list of file paths and metadata for an installed package.
 #[derive(Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Receipt {

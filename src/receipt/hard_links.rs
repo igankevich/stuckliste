@@ -22,6 +22,7 @@ impl HardLinks {
     const OUTER_BLOCK_LEN: usize = 4096;
     const INNER_BLOCK_LEN: usize = 128;
 
+    /// Transform into inner representation.
     pub fn into_inner(self) -> HashMap<u32, Vec<CString>> {
         self.0
     }
