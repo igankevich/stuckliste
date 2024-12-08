@@ -3,7 +3,9 @@
 . ./ci/preamble.sh
 
 cargo_publish() {
-    cargo publish --quiet --package stuckliste --package stuckliste-cli
+    for package in stuckliste stuckliste-cli; do
+        cargo publish --quiet --package "$package"
+    done
 }
 
 # TODO
