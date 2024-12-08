@@ -2,10 +2,9 @@
 
 . ./ci/preamble.sh
 
-# TODO
-#if test "$GITHUB_ACTIONS" = "true" && test "$GITHUB_REF_TYPE" != "tag"; then
-#    exit 0
-#fi
+if test "$GITHUB_ACTIONS" = "true" && test "$GITHUB_REF_TYPE" != "tag"; then
+    exit 0
+fi
 
 set -e
 root="$(pwd)"
