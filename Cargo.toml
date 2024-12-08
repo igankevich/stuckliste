@@ -28,7 +28,7 @@ members = [".", "cli"]
 [workspace.dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"] }
 arbtest = "0.3.1"
-random-dir = { git = "https://github.com/igankevich/kpea", version = "0.2.3", tag = "0.2.3" }
+random-dir = "0.2.3"
 stuckliste = { path = "." }
 
 [lints.clippy]
