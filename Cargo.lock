@@ -386,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "stuckliste"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "arbitrary",
  "arbtest",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "stuckliste-cli"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "arbitrary",
  "arbtest",
