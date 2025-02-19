@@ -17,6 +17,10 @@ use crate::receipt::PathComponentVec;
 use crate::receipt::VirtualPathTree;
 use crate::Bom;
 
+// TODO add `receipt` feature
+// TODO generate random executables with `random-dir`
+// TODO scan MacOS for receipts and read them all with assertions enabled
+
 /// Configuration for creating a receipt.
 pub struct ReceiptBuilder {
     paths_only: bool,

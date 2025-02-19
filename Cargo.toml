@@ -13,7 +13,7 @@ categories = ["encoding", "filesystem"]
 include = ["**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
-libc = "0.2.164"
+libc = "0.2.169"
 normalize-path = "0.2.1"
 walkdir = "2.5.0"
 
@@ -26,12 +26,12 @@ arbtest.workspace = true
 members = [".", "cli"]
 
 [workspace.package]
-version = "0.3.7"
+version = "0.3.8"
 
 [workspace.dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"] }
-arbtest = "0.3.1"
-random-dir = "0.2.3"
+arbtest = "0.3.2"
+random-dir = "0.2.4"
 stuckliste = { path = ".", version = "*" }
 
 [lints.clippy]
