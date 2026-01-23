@@ -129,6 +129,7 @@ mod tests {
                 .unwrap()
                 .read_to_string(&mut output)
                 .unwrap();
+            cksum.wait().unwrap();
             let mut iter = output.split_ascii_whitespace();
             let expected_checksum: u32 = iter.next().unwrap().parse().unwrap();
             let actual_checksum = CrcReader::new(&input[..]).digest().unwrap();

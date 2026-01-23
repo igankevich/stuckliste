@@ -13,7 +13,7 @@ categories = ["encoding", "filesystem"]
 include = ["**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
-libc = "0.2.169"
+libc = "0.2.180"
 normalize-path = "0.2.1"
 walkdir = "2.5.0"
 
@@ -26,13 +26,13 @@ arbtest.workspace = true
 members = [".", "cli"]
 
 [workspace.package]
-version = "0.3.8"
+version = "0.4.0"
 
 [workspace.dependencies]
-arbitrary = { version = "1.4.1", features = ["derive"] }
+arbitrary = { version = "1.4.2", features = ["derive"] }
 arbtest = "0.3.2"
 random-dir = "0.2.4"
-stuckliste = { path = ".", version = "*" }
+stuckliste = { path = ".", version = "0.4.0" }
 
 [lints.clippy]
 unwrap_used = "deny"

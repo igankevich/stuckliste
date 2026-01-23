@@ -7,13 +7,12 @@ use arbtest::arbtest;
 use random_dir::Dir;
 use random_dir::DirBuilder;
 use tempfile::TempDir;
-use test_bin::get_test_bin;
 
 #[test]
 fn compare_mkbom() {
     compare_mkbom_and_lsbom(
-        || get_test_bin("mkbom"),
-        || get_test_bin("lsbom"),
+        || test_bin::get_test_bin!("mkbom"),
+        || test_bin::get_test_bin!("lsbom"),
         || Command::new("mkbom"),
         || Command::new("lsbom"),
     );
@@ -27,11 +26,11 @@ fn compare_mkbom() {
 fn compare_mkbom_s() {
     compare_mkbom_and_lsbom(
         || {
-            let mut command = get_test_bin("mkbom");
+            let mut command = test_bin::get_test_bin!("mkbom");
             command.arg("-s");
             command
         },
-        || get_test_bin("lsbom"),
+        || test_bin::get_test_bin!("lsbom"),
         || {
             let mut command = Command::new("mkbom");
             command.arg("-s");
