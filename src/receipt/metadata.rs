@@ -133,7 +133,12 @@ impl Metadata {
     }
 
     /// Create metadata from the provided file path.
-    pub fn new(path: &Path, path_only: bool, override_uid: Option<u32>, override_gid: Option<u32>) -> Result<Self, Error> {
+    pub fn new(
+        path: &Path,
+        path_only: bool,
+        override_uid: Option<u32>,
+        override_gid: Option<u32>,
+    ) -> Result<Self, Error> {
         let metadata = std::fs::symlink_metadata(path)?;
         if path_only {
             return Ok(Self::Entry(Entry {

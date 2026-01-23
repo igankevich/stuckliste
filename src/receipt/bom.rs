@@ -31,7 +31,11 @@ pub struct ReceiptBuilder {
 impl ReceiptBuilder {
     /// Create receipt builder with the default parameters.
     pub fn new() -> Self {
-        Self { paths_only: false, override_uid: None, override_gid: None }
+        Self {
+            paths_only: false,
+            override_uid: None,
+            override_gid: None,
+        }
     }
 
     /// Do not include metadata in the receipt, include only file paths.
@@ -54,7 +58,12 @@ impl ReceiptBuilder {
 
     /// Create a receipt using the provided parameters.
     pub fn create<P: AsRef<Path>>(self, directory: P) -> Result<Receipt, Error> {
-        let entries = PathComponentVec::from_dir(directory, self.paths_only, self.override_uid, self.override_gid)?;
+        let entries = PathComponentVec::from_dir(
+            directory,
+            self.paths_only,
+            self.override_uid,
+            self.override_gid,
+        )?;
         Ok(Receipt { entries })
     }
 }
