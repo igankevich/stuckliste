@@ -24,12 +24,14 @@ use crate::Bom;
 /// Configuration for creating a receipt.
 pub struct ReceiptBuilder {
     paths_only: bool,
+    override_uid: Option<u32>,
+    override_gid: Option<u32>,
 }
 
 impl ReceiptBuilder {
     /// Create receipt builder with the default parameters.
     pub fn new() -> Self {
-        Self { paths_only: false }
+        Self { paths_only: false, override_uid: None, override_gid: None }
     }
 
     /// Do not include metadata in the receipt, include only file paths.
@@ -38,9 +40,21 @@ impl ReceiptBuilder {
         self
     }
 
+    /// Replace uid's.
+    pub fn override_uid(mut self, value: u32) -> Self {
+        self.override_uid = Some(value);
+        self
+    }
+
+    /// Replace gid's.
+    pub fn override_gid(mut self, value: u32) -> Self {
+        self.override_gid = Some(value);
+        self
+    }
+
     /// Create a receipt using the provided parameters.
     pub fn create<P: AsRef<Path>>(self, directory: P) -> Result<Receipt, Error> {
-        let entries = PathComponentVec::from_dir(directory, self.paths_only)?;
+        let entries = PathComponentVec::from_dir(directory, self.paths_only, self.override_uid, self.override_gid)?;
         Ok(Receipt { entries })
     }
 }

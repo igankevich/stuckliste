@@ -203,7 +203,7 @@ impl PathComponentVec {
     }
 
     /// Create a vector by recursively scanning the provided directory.
-    pub fn from_dir<P: AsRef<Path>>(directory: P, paths_only: bool) -> Result<Self, Error> {
+    pub fn from_dir<P: AsRef<Path>>(directory: P, paths_only: bool, override_uid: Option<u32>, override_gid: Option<u32>) -> Result<Self, Error> {
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
         // Id starts with 1.
@@ -222,7 +222,8 @@ impl PathComponentVec {
             };
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
-            let metadata = Metadata::new(entry.path(), paths_only)?;
+            let metadata = Metadata::new(entry.path(), paths_only, override_uid, override_gid)?;
+
             let parent = match dirname {
                 Some(d) => components.get(d).map(|node| node.seq_no).unwrap_or(0),
                 None => 0,
@@ -345,8 +346,8 @@ mod tests {
                     HardLink,
                 ])
                 .create(u)?;
-            let paths_only = u.arbitrary()?;
-            let nodes = PathComponentVec::from_dir(directory.path(), paths_only).unwrap();
+            let (paths_only, override_uid, override_gid) = u.arbitrary()?;
+            let nodes = PathComponentVec::from_dir(directory.path(), paths_only, override_uid, override_gid).unwrap();
             Ok(nodes)
         }
     }

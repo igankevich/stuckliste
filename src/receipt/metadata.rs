@@ -83,9 +83,17 @@ impl Metadata {
         get_common_field!(self, uid, 0)
     }
 
+    fn set_uid(&mut self, value: u32) {
+        set_common_field!(self, uid, value);
+    }
+
     /// Get file owner's group id.
     pub fn gid(&self) -> u32 {
         get_common_field!(self, gid, 0)
+    }
+
+    fn set_gid(&mut self, value: u32) {
+        set_common_field!(self, gid, value);
     }
 
     /// Get file's last modification time.
@@ -125,7 +133,7 @@ impl Metadata {
     }
 
     /// Create metadata from the provided file path.
-    pub fn new(path: &Path, path_only: bool) -> Result<Self, Error> {
+    pub fn new(path: &Path, path_only: bool, override_uid: Option<u32>, override_gid: Option<u32>) -> Result<Self, Error> {
         let metadata = std::fs::symlink_metadata(path)?;
         if path_only {
             return Ok(Self::Entry(Entry {
@@ -133,6 +141,15 @@ impl Metadata {
             }));
         }
         let mut metadata: Metadata = metadata.try_into()?;
+
+        if let Some(uid) = override_uid {
+            metadata.set_uid(uid);
+        }
+
+        if let Some(gid) = override_gid {
+            metadata.set_gid(gid);
+        }
+
         match metadata {
             Metadata::File(File {
                 ref mut checksum, ..
