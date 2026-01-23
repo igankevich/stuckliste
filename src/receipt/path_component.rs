@@ -206,6 +206,7 @@ impl PathComponentVec {
     pub fn from_dir<P: AsRef<Path>>(
         directory: P,
         paths_only: bool,
+        override_mtime: Option<u32>,
         override_uid: Option<u32>,
         override_gid: Option<u32>,
     ) -> Result<Self, Error> {
@@ -227,7 +228,7 @@ impl PathComponentVec {
             };
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
-            let metadata = Metadata::new(entry.path(), paths_only, override_uid, override_gid)?;
+            let metadata = Metadata::new(entry.path(), paths_only, override_mtime, override_uid, override_gid)?;
 
             let parent = match dirname {
                 Some(d) => components.get(d).map(|node| node.seq_no).unwrap_or(0),
@@ -351,14 +352,14 @@ mod tests {
                     HardLink,
                 ])
                 .create(u)?;
-            let (paths_only, override_uid, override_gid) = u.arbitrary()?;
+            let (paths_only, override_mtime, override_uid, override_gid) = u.arbitrary()?;
             let nodes = PathComponentVec::from_dir(
                 directory.path(),
                 paths_only,
+                override_mtime,
                 override_uid,
                 override_gid,
-            )
-            .unwrap();
+            ).unwrap();
             Ok(nodes)
         }
     }
