@@ -213,7 +213,7 @@ impl PathComponentVec {
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
         // Id starts with 1.
         let mut seq_no: u32 = 1;
-        for entry in WalkDir::new(directory).into_iter() {
+        for entry in WalkDir::new(directory).sort_by_file_name().into_iter() {
             let entry = entry?;
             let entry_path = entry
                 .path()
