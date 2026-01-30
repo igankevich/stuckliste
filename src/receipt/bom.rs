@@ -24,6 +24,7 @@ use crate::Bom;
 /// Configuration for creating a receipt.
 pub struct ReceiptBuilder {
     paths_only: bool,
+    override_mtime: Option<u32>,
     override_uid: Option<u32>,
     override_gid: Option<u32>,
 }
@@ -33,6 +34,7 @@ impl ReceiptBuilder {
     pub fn new() -> Self {
         Self {
             paths_only: false,
+            override_mtime: None,
             override_uid: None,
             override_gid: None,
         }
@@ -41,6 +43,12 @@ impl ReceiptBuilder {
     /// Do not include metadata in the receipt, include only file paths.
     pub fn paths_only(mut self, value: bool) -> Self {
         self.paths_only = value;
+        self
+    }
+
+    /// Replace timestamps.
+    pub fn override_mtime(mut self, value: u32) -> Self {
+        self.override_mtime = Some(value);
         self
     }
 
@@ -61,6 +69,7 @@ impl ReceiptBuilder {
         let entries = PathComponentVec::from_dir(
             directory,
             self.paths_only,
+            self.override_mtime,
             self.override_uid,
             self.override_gid,
         )?;

@@ -101,6 +101,10 @@ impl Metadata {
         get_common_field!(self, mtime, 0)
     }
 
+    fn set_mtime(&mut self, value: u32) {
+        set_common_field!(self, mtime, value);
+    }
+
     /// Get file size.
     pub fn size(&self) -> u64 {
         get_common_field!(self, size, 0)
@@ -136,16 +140,28 @@ impl Metadata {
     pub fn new(
         path: &Path,
         path_only: bool,
+        override_mtime: Option<u32>,
         override_uid: Option<u32>,
         override_gid: Option<u32>,
     ) -> Result<Self, Error> {
         let metadata = std::fs::symlink_metadata(path)?;
+        let ts_on_disk_system = metadata.modified()?;
+        let ts_on_disk_epoch = ts_on_disk_system
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| { Error::new(ErrorKind::Other, e)})?
+            .as_secs();
+
         if path_only {
             return Ok(Self::Entry(Entry {
                 entry_type: metadata.file_type().try_into()?,
             }));
         }
         let mut metadata: Metadata = metadata.try_into()?;
+        metadata.set_mtime(ts_on_disk_epoch as u32);
+
+        if let Some(m) = override_mtime {
+            metadata.set_mtime(m);
+        }
 
         if let Some(uid) = override_uid {
             metadata.set_uid(uid);
