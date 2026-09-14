@@ -1,4 +1,6 @@
+use std::fs::create_dir_all;
 use std::fs::remove_file;
+use std::fs::File;
 use std::process::Command;
 use std::sync::Once;
 
@@ -38,6 +40,36 @@ fn compare_mkbom_s() {
         },
         || Command::new("lsbom"),
     );
+}
+
+// A directory that has children followed by a later sibling. Written in
+// traversal order, this tree breaks the `(parent, name)` ordering MacOS reads
+// the paths tree by, and `lsbom` stops after `./a/f` and reports success.
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "Only MacOS's original `lsbom` relies on the tree being ordered"
+)]
+#[test]
+fn compare_lsbom_directory_before_sibling() {
+    let workdir = TempDir::new().unwrap();
+    let directory = workdir.path().join("root");
+    create_dir_all(directory.join("a")).unwrap();
+    File::create(directory.join("a").join("f")).unwrap();
+    File::create(directory.join("z")).unwrap();
+    let bom = workdir.path().join("our.bom");
+    let status = test_bin::get_test_bin!("mkbom")
+        .arg(&directory)
+        .arg(&bom)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let output = Command::new("lsbom").arg("-s").arg(&bom).output().unwrap();
+    assert!(
+        output.status.success(),
+        "their stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    similar_asserts::assert_eq!(normalize_output(&output.stdout), ".\n./a\n./a/f\n./z");
 }
 
 fn compare_mkbom_and_lsbom<F1, F2, F3, F4>(
