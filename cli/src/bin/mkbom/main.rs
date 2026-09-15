@@ -14,6 +14,12 @@ struct Args {
     /// File list.
     #[arg(short = 'i', value_name = "file")]
     file_list: Option<PathBuf>,
+    /// Record this user id for every entry.
+    #[arg(short = 'u', value_name = "uid")]
+    uid: Option<u32>,
+    /// Record this group id for every entry.
+    #[arg(short = 'g', value_name = "gid")]
+    gid: Option<u32>,
     /// Input directory.
     #[arg(value_name = "directory")]
     directory: Option<PathBuf>,
@@ -41,9 +47,14 @@ fn do_main() -> Result<ExitCode, Error> {
         return Err(Error::other("output file is not specified"));
     };
     if let Some(directory) = args.directory {
-        let bom = ReceiptBuilder::new()
-            .paths_only(args.paths_only)
-            .create(&directory)?;
+        let mut builder = ReceiptBuilder::new().paths_only(args.paths_only);
+        if let Some(uid) = args.uid {
+            builder = builder.override_uid(uid);
+        }
+        if let Some(gid) = args.gid {
+            builder = builder.override_gid(gid);
+        }
+        let bom = builder.create(&directory)?;
         let file = File::create(&output_path)?;
         bom.write(file)?;
         Ok(ExitCode::SUCCESS)
