@@ -5,7 +5,7 @@
 main() {
     root="$(pwd)"
     target=x86_64-unknown-linux-musl
-    rustup toolchain add "$RUST_VERSION" --target "$target"
+    rustup target add "$RUST_VERSION"-"$target"
     cargo build \
         --quiet \
         --release \
