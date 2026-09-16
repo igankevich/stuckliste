@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4.1.4
       - name: Init
         run: ./ci/init.sh
-      - name: Init Ubuntu
+      - name: Install Rust
         run: ./ci/rust.sh
       - name: Test
         run: ./ci/test.sh
@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4.1.4
       - name: Init
         run: ./ci/init.sh
-      - name: Init MacOS
+      - name: Install Rust
         run: ./ci/rust.sh
       - name: Test
         run: ./ci/test.sh
@@ -58,6 +58,8 @@ jobs:
         uses: actions/checkout@v4.1.4
       - name: Init
         run: ./ci/init.sh
+      - name: Brew
+        run: ./ci/brew.sh
       - name: Build relese binaries
         run: ./ci/build.sh
       - name: Upload archives as artifacts
