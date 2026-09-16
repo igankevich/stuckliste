@@ -260,9 +260,21 @@ impl BlockWrite<Context> for PathComponentVec {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
+        // The paths tree is ordered by `(parent, name)`, and MacOS's own reader
+        // relies on it: it stops at the first entry that breaks the order and
+        // reports the truncated tree as if it were complete. Parents still
+        // precede their children, because an entry keyed `(p, _)` has children
+        // keyed `(s, _)` where `s` is its own `seq_no`, and `from_dir` numbers
+        // a parent before its children, so `p < s`.
+        let mut ordered: Vec<_> = self.iter().cloned().collect();
+        ordered.sort_unstable_by(|a, b| {
+            a.parent
+                .cmp(&b.parent)
+                .then_with(|| a.name.as_bytes().cmp(b.name.as_bytes()))
+        });
         let paths = PathComponentTree::new(
-            self.iter()
-                .cloned()
+            ordered
+                .into_iter()
                 .map(|component| component.into_key_and_value())
                 .collect(),
             Self::BLOCK_LEN,
