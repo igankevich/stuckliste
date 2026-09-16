@@ -23,7 +23,6 @@ jobs:
   macos:
     runs-on: macos-latest
     env:
-      TZ: Europe/Berlin
       # run each test for 5 seconds
       ARBTEST_BUDGET_MS: 5000
     steps:
@@ -35,20 +34,37 @@ jobs:
         run: ./ci/rust.sh
       - name: Test
         run: ./ci/test.sh
-  publish-binaries:
-    needs: [ubuntu, macos]
-    if: github.ref_type == 'tag'
-    permissions:
-      contents: write
-      packages: read
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4
       - name: Init
         run: ./ci/init.sh
-      - name: Build static binaries
+      - name: Build relese binaries
         run: ./ci/build.sh
+      - name: Upload archives as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stuckliste
+          path: stuckliste-${{ github.ref_name }}.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: [ubuntu, macos, build]
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+      packages: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux binaries
+        uses: actions/download-artifact@v5
+        with:
+          name: stuckliste
+      - name: List files
+        run: ls -l *.tar.gz
       - name: Create release
         uses: actions/create-release@v1
         id: create_release
@@ -66,6 +82,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./stuckliste-${{  github.ref_name }}.tar.gz
-          asset_name: stuckliste-${{  github.ref_name }}.tar.gz
+          asset_path: ./stuckliste-${{ github.ref_name }}.tar.gz
+          asset_name: stuckliste-${{ github.ref_name }}.tar.gz
           asset_content_type: application/gzip
