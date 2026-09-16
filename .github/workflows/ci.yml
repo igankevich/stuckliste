@@ -34,7 +34,7 @@ jobs:
         run: ./ci/rust.sh
       - name: Test
         run: ./ci/test.sh
-  build-linux:
+  build-ubuntu:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
