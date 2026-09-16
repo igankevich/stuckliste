@@ -12,7 +12,7 @@ main() {
         --release \
         --target "$target" \
         --package stuckliste-cli
-    version="$GITHUB_REF_NAME"
+    version="$(echo "$GITHUB_REF_NAME" | sed 's:/:-:g')"
     rm -rf --one-file-system release
     release_dir=release/"$version"
     mkdir -p "$release_dir"/"$target"
