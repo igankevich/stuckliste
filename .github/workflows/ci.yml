@@ -5,34 +5,36 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref
     }}
   cancel-in-progress: true
+env:
+  RUST_BACKTRACE: 1
+  RUST_VERSION: 1.98.1
 jobs:
   ubuntu:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/igankevich/stuckliste-ci:latest
-    env:
-      RUST_BACKTRACE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4
       - name: Init
         run: ./ci/init.sh
-      - name: Lint
-        run: ./ci/lint.sh
+      - name: Init Ubuntu
+        run: ./ci/ubuntu.sh
       - name: Test
         run: ./ci/test.sh
   macos:
     runs-on: macos-latest
     env:
       TZ: Europe/Berlin
-      RUST_BACKTRACE: 1
       # run each test for 5 seconds
       ARBTEST_BUDGET_MS: 5000
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo test --workspace --all-targets
+      - name: Init
+        run: ./ci/init.sh
+      - name: Init MacOS
+        run: ./ci/macos.sh
+      - name: Test
+        run: ./ci/test.sh
   publish-binaries:
     needs: [ubuntu, macos]
     if: github.ref_type == 'tag'
@@ -40,8 +42,6 @@ jobs:
       contents: write
       packages: read
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/igankevich/stuckliste-ci:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4

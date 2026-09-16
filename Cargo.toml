@@ -41,3 +41,7 @@ panic = "deny"
 
 [lints.rust]
 missing_docs = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1

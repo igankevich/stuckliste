@@ -1,4 +1,4 @@
-FROM rust:1.92.0
+FROM rust:1.98.1
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get -qq update \
@@ -14,18 +14,18 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
-    RUST_VERSION=1.92.0 \
+    RUST_VERSION=1.98.1 \
     PATH=/usr/local/cargo/bin:$PATH
 
 RUN rustup toolchain add nightly \
     --target x86_64-unknown-linux-gnu \
     --component rustfmt --component miri --component llvm-tools-preview
-RUN rustup toolchain add 1.92.0 \
+RUN rustup toolchain add 1.98.1 \
     --target x86_64-unknown-linux-gnu \
     --component clippy --component rustfmt --component llvm-tools-preview
-RUN rustup target add --toolchain 1.92.0 \
+RUN rustup target add --toolchain 1.98.1 \
     x86_64-unknown-linux-musl
-RUN rustup default 1.92.0-x86_64-unknown-linux-gnu
+RUN rustup default 1.98.1-x86_64-unknown-linux-gnu
 RUN cargo install --quiet cargo-deny
 
 RUN curl --location --silent --fail --output /usr/local/bin/shfmt https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_amd64 && \
