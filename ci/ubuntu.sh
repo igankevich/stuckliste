@@ -11,8 +11,8 @@ main() {
 }
 
 install_system_packages() {
-    apt-get update -qq
-    apt-get install -qqy --no-install-recommends clang libclang-dev g++ make jq
+    sudo -n apt-get update -qq
+    sudo -n apt-get install -qqy --no-install-recommends clang libclang-dev g++ make jq
 }
 
 install_bomutils() {
