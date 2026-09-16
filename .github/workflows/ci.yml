@@ -84,6 +84,10 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - name: Init
+        run: ./ci/init.sh
       - name: Download Linux binaries
         uses: actions/download-artifact@v5
         with:
@@ -94,8 +98,6 @@ jobs:
           name: stuckliste-macos
       - name: List files
         run: ls -l *.tar.gz
-      - name: Set version
-        run: ./ci/version.sh
       - name: Create release
         uses: actions/create-release@v1
         id: create_release
