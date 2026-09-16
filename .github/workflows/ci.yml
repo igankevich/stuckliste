@@ -34,7 +34,7 @@ jobs:
         run: ./ci/rust.sh
       - name: Test
         run: ./ci/test.sh
-  build:
+  build-linux:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,13 +46,30 @@ jobs:
       - name: Upload archives as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: stuckliste
-          path: stuckliste-${{ github.ref_name }}.tar.gz
+          name: stuckliste-ubuntu
+          path: stuckliste-${{ env.OS }}-${{ env.ARCH }}-${{ env.VERSION }}.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - name: Init
+        run: ./ci/init.sh
+      - name: Build relese binaries
+        run: ./ci/build.sh
+      - name: Upload archives as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stuckliste-macos
+          path: stuckliste-${{ env.OS }}-${{ env.ARCH }}-${{ env.VERSION }}.tar.gz
           compression-level: 0
           if-no-files-found: error
           retention-days: 1
   publish:
-    needs: [ubuntu, macos, build]
+    needs: [ubuntu, macos, build-ubuntu, build-macos]
     if: github.ref_type == 'tag'
     permissions:
       contents: write
@@ -62,7 +79,11 @@ jobs:
       - name: Download Linux binaries
         uses: actions/download-artifact@v5
         with:
-          name: stuckliste
+          name: stuckliste-ubuntu
+      - name: Download MacOS binaries
+        uses: actions/download-artifact@v5
+        with:
+          name: stuckliste-macos
       - name: List files
         run: ls -l *.tar.gz
       - name: Create release
@@ -82,6 +103,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./stuckliste-${{ github.ref_name }}.tar.gz
-          asset_name: stuckliste-${{ github.ref_name }}.tar.gz
+          asset_path: stuckliste-Linux-x86_64-${{ env.VERSION }}.tar.gz
+          asset_name: stuckliste-Linux-x86_64-${{ env.VERSION }}.tar.gz
           asset_content_type: application/gzip
