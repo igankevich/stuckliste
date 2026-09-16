@@ -28,7 +28,7 @@ install_rust() {
     rustup toolchain add "$RUST_VERSION" \
         --component clippy \
         --component rustfmt
-    rustup default "$RUST_VERSION"-stable
+    rustup default "$RUST_VERSION"
 }
 
 cleanup() {
