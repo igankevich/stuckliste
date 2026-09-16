@@ -212,8 +212,7 @@ impl PathComponentVec {
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
         // Id starts with 1.
-        let mut seq_no: u32 = 1;
-        for entry in WalkDir::new(directory).sort_by_file_name().into_iter() {
+        for (seq_no, entry) in (1_u32..).zip(WalkDir::new(directory).sort_by_file_name()) {
             let entry = entry?;
             let entry_path = entry
                 .path()
@@ -245,10 +244,9 @@ impl PathComponentVec {
                 metadata,
             };
             components.insert(relative_path, node);
-            seq_no += 1;
         }
         let mut components: Vec<_> = components.into_values().collect();
-        components.sort_unstable_by(|a, b| a.seq_no.cmp(&b.seq_no));
+        components.sort_unstable_by_key(|a| a.seq_no);
         Ok(Self { components })
     }
 }
@@ -301,7 +299,7 @@ impl BlockRead<Context> for PathComponentVec {
                 name: v.name,
             })
             .collect();
-        components.sort_unstable_by(|a, b| a.seq_no.cmp(&b.seq_no));
+        components.sort_unstable_by_key(|a| a.seq_no);
         #[cfg(debug_assertions)]
         for (i, comp) in components.iter().enumerate() {
             debug_assert!(

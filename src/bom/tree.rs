@@ -142,8 +142,9 @@ impl<C, K: BlockWrite<C>, V: BlockWrite<C>> BlockWrite<C> for VecTree<K, V, C> {
                 let mut raw_entries = Vec::with_capacity(data_nodes.len());
                 let first_block = blocks.next_block_index();
                 let last_block = first_block + data_nodes.len() as u32 - 1;
-                let mut current_block = first_block;
-                for (mut data_node, last_value_block) in data_nodes.into_iter() {
+                for (current_block, (mut data_node, last_value_block)) in
+                    (first_block..).zip(data_nodes)
+                {
                     data_node.prev = if current_block == first_block {
                         0
                     } else {
@@ -157,7 +158,6 @@ impl<C, K: BlockWrite<C>, V: BlockWrite<C>> BlockWrite<C> for VecTree<K, V, C> {
                     let block =
                         blocks.append(writer.by_ref(), |writer| data_node.write_be(writer))?;
                     debug_assert!(block == current_block);
-                    current_block += 1;
                     raw_entries.push((block, last_value_block));
                 }
                 meta_nodes.push(RawTreeNode {
@@ -170,8 +170,7 @@ impl<C, K: BlockWrite<C>, V: BlockWrite<C>> BlockWrite<C> for VecTree<K, V, C> {
             // set next/prev for meta nodes
             let first_block = blocks.next_block_index();
             let last_block = first_block + meta_nodes.len() as u32 - 1;
-            let mut current_block = first_block;
-            for mut meta_node in meta_nodes.into_iter() {
+            for (current_block, mut meta_node) in (first_block..).zip(meta_nodes) {
                 meta_node.prev = if current_block == first_block {
                     0
                 } else {
@@ -184,7 +183,6 @@ impl<C, K: BlockWrite<C>, V: BlockWrite<C>> BlockWrite<C> for VecTree<K, V, C> {
                 };
                 let block = blocks.append(writer.by_ref(), |writer| meta_node.write_be(writer))?;
                 debug_assert!(block == current_block);
-                current_block += 1;
             }
             first_block
         };
