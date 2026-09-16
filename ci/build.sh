@@ -4,23 +4,32 @@
 
 main() {
     root="$(pwd)"
-    target=x86_64-unknown-linux-musl
-    rustup toolchain add "$RUST_VERSION" --target "$target"
-    rustup default "$RUST_VERSION"
+    install_rust
     cargo build \
         --quiet \
         --release \
         --target "$target" \
         --package stuckliste-cli
-    version="$(echo "$GITHUB_REF_NAME" | sed 's:/:-:g')"
-    rm -rf --one-file-system release
-    release_dir=release/"$version"
-    mkdir -p "$release_dir"/"$target"
+    archive_dir="$workdir"/archive
+    mkdir -p "$archive_dir"
     for filename in lsbom mkbom; do
-        cp -vn target/"$target"/release/"$filename" "$release_dir"/"$target"/
+        cp -v target/"$target"/release/"$filename" "$archive_dir"/
     done
-    cd "$release_dir"
+    cd "$archive_dir"
     create_tar_archive
+}
+
+install_rust() {
+    case "$OS-$ARCH" in
+    Linux-x86_64) target=x86_64-unknown-linux-musl ;;
+    Darwin-arm64) target=aarch64-apple-darwin ;;
+    *)
+        printf "Unsupported OS/architecture combination: %s-%s\n" "$OS" "$ARCH" >&2
+        exit 1
+        ;;
+    esac
+    rustup toolchain add "$RUST_VERSION" --target "$target"
+    rustup default "$RUST_VERSION"
 }
 
 create_tar_archive() {
@@ -32,7 +41,7 @@ create_tar_archive() {
         --group=0 \
         --gzip \
         --verbose \
-        --file="$root"/stuckliste-"$version".tar.gz \
+        --file="$root"/stuckliste-"$OS"-"$ARCH"-"$VERSION".tar.gz \
         --null \
         --files-from="$workdir"/files
 }
