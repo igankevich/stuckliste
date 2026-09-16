@@ -17,7 +17,7 @@ jobs:
       - name: Init
         run: ./ci/init.sh
       - name: Init Ubuntu
-        run: ./ci/ubuntu.sh
+        run: ./ci/rust.sh
       - name: Test
         run: ./ci/test.sh
   macos:
@@ -32,7 +32,7 @@ jobs:
       - name: Init
         run: ./ci/init.sh
       - name: Init MacOS
-        run: ./ci/macos.sh
+        run: ./ci/rust.sh
       - name: Test
         run: ./ci/test.sh
   publish-binaries:

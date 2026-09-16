@@ -10,6 +10,7 @@ use random_dir::Dir;
 use random_dir::DirBuilder;
 use tempfile::TempDir;
 
+#[cfg_attr(not(target_os = "macos"), ignore = "`bomutils` bom fail this test")]
 #[test]
 fn compare_mkbom() {
     compare_mkbom_and_lsbom(
