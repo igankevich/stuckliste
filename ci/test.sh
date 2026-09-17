@@ -3,4 +3,4 @@
 . ./ci/preamble.sh
 
 cargo clippy --workspace --quiet --all-targets -- -D warnings
-cargo test --workspace --quiet --no-fail-fast -- --nocapture --test-threads=1
+cargo test --workspace --quiet --no-fail-fast -- --nocapture

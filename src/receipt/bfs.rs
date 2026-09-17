@@ -2,12 +2,18 @@ use std::collections::VecDeque;
 use std::fs::FileType;
 use std::path::PathBuf;
 
+/// Directory entry.
 #[derive(Debug)]
 pub struct DirEntry {
+    /// File type.
     pub kind: FileType,
+    /// Full file path.
     pub path: PathBuf,
 }
 
+/// Traverse file system tree under `path` in breadth-first order.
+///
+/// Additionally entries within each directory are sorted by file name.
 pub fn bfs(path: PathBuf) -> std::io::Result<Vec<DirEntry>> {
     let mut entries = Vec::new();
     let root_kind = std::fs::metadata(&path)?.file_type();
