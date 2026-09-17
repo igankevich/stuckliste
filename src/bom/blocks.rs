@@ -208,6 +208,7 @@ mod tests {
     }
 
     impl Blocks {
+        #[allow(unused)]
         fn print_unread_blocks(&self) {
             for i in self.unread_blocks.iter() {
                 eprintln!("unread block {}: {:?}", i, self.blocks.get(*i));
@@ -225,7 +226,7 @@ mod tests {
 
     impl Drop for Blocks {
         fn drop(&mut self) {
-            self.print_unread_blocks();
+            //self.print_unread_blocks();
         }
     }
 }

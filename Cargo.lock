@@ -440,19 +440,19 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "stuckliste"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "arbitrary",
  "arbtest",
  "libc",
  "normalize-path",
  "random-dir",
- "walkdir",
+ "tempfile",
 ]
 
 [[package]]
 name = "stuckliste-cli"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "arbitrary",
  "arbtest",

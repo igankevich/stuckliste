@@ -14,8 +14,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use normalize_path::NormalizePath;
-use walkdir::WalkDir;
 
+use crate::receipt::bfs;
 use crate::receipt::BomInfo;
 use crate::receipt::Context;
 use crate::receipt::Metadata;
@@ -212,10 +212,10 @@ impl PathComponentVec {
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
         // Id starts with 1.
-        for (seq_no, entry) in (1_u32..).zip(WalkDir::new(directory).sort_by_file_name()) {
-            let entry = entry?;
+        let files = bfs(directory.to_path_buf())?;
+        for (seq_no, entry) in (1_u32..).zip(files) {
             let entry_path = entry
-                .path()
+                .path
                 .strip_prefix(directory)
                 .map_err(Error::other)?
                 .normalize();
@@ -226,7 +226,7 @@ impl PathComponentVec {
             };
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();
-            let metadata = Metadata::new(entry.path(), paths_only, override_uid, override_gid)?;
+            let metadata = Metadata::new(&entry.path, paths_only, override_uid, override_gid)?;
 
             let parent = match dirname {
                 Some(d) => components.get(d).map(|node| node.seq_no).unwrap_or(0),
@@ -258,21 +258,9 @@ impl BlockWrite<Context> for PathComponentVec {
         blocks: &mut Blocks,
         context: &mut Context,
     ) -> Result<u32, Error> {
-        // The paths tree is ordered by `(parent, name)`, and MacOS's own reader
-        // relies on it: it stops at the first entry that breaks the order and
-        // reports the truncated tree as if it were complete. Parents still
-        // precede their children, because an entry keyed `(p, _)` has children
-        // keyed `(s, _)` where `s` is its own `seq_no`, and `from_dir` numbers
-        // a parent before its children, so `p < s`.
-        let mut ordered: Vec<_> = self.iter().cloned().collect();
-        ordered.sort_unstable_by(|a, b| {
-            a.parent
-                .cmp(&b.parent)
-                .then_with(|| a.name.as_bytes().cmp(b.name.as_bytes()))
-        });
         let paths = PathComponentTree::new(
-            ordered
-                .into_iter()
+            self.iter()
+                .cloned()
                 .map(|component| component.into_key_and_value())
                 .collect(),
             Self::BLOCK_LEN,

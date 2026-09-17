@@ -1,5 +1,6 @@
 //! Reading/writing receipt files.
 
+mod bfs;
 mod bom;
 mod bom_info;
 mod context;
@@ -14,6 +15,7 @@ mod path_component;
 mod ptr;
 mod virtual_paths;
 
+pub(crate) use self::bfs::*;
 pub use self::bom::*;
 pub use self::bom_info::*;
 pub use self::context::*;
