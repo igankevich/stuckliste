@@ -60,7 +60,7 @@ impl FileType {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, not(unix)))]
     pub(crate) fn to_mode_bits(self) -> u16 {
         (self as u16) << 12
     }
@@ -74,6 +74,8 @@ impl FileType {
 
 impl TryFrom<std::fs::FileType> for FileType {
     type Error = Error;
+
+    #[cfg(unix)]
     fn try_from(other: std::fs::FileType) -> Result<Self, Self::Error> {
         use std::os::unix::fs::FileTypeExt;
         if other.is_dir() {
@@ -84,6 +86,20 @@ impl TryFrom<std::fs::FileType> for FileType {
             Ok(Self::BlockDevice)
         } else if other.is_char_device() {
             Ok(Self::CharDevice)
+        } else if other.is_file() {
+            Ok(Self::Regular)
+        } else {
+            // named pipes and sockets are not supported
+            Err(ErrorKind::InvalidData.into())
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn try_from(other: std::fs::FileType) -> Result<Self, Self::Error> {
+        if other.is_dir() {
+            Ok(Self::Directory)
+        } else if other.is_symlink() {
+            Ok(Self::Symlink)
         } else if other.is_file() {
             Ok(Self::Regular)
         } else {
@@ -130,6 +146,8 @@ impl TryFrom<u8> for EntryType {
 
 impl TryFrom<std::fs::FileType> for EntryType {
     type Error = Error;
+
+    #[cfg(unix)]
     fn try_from(other: std::fs::FileType) -> Result<Self, Self::Error> {
         use std::os::unix::fs::FileTypeExt;
         if other.is_dir() {
@@ -142,6 +160,19 @@ impl TryFrom<std::fs::FileType> for EntryType {
             Ok(Self::File)
         } else {
             // named pipes and sockets are not supported
+            Err(ErrorKind::InvalidData.into())
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn try_from(other: std::fs::FileType) -> Result<Self, Self::Error> {
+        if other.is_dir() {
+            Ok(Self::Directory)
+        } else if other.is_symlink() {
+            Ok(Self::Link)
+        } else if other.is_file() {
+            Ok(Self::File)
+        } else {
             Err(ErrorKind::InvalidData.into())
         }
     }

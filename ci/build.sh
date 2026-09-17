@@ -23,6 +23,10 @@ install_rust() {
     case "$OS-$ARCH" in
     Linux-x86_64) target=x86_64-unknown-linux-musl ;;
     Darwin-arm64) target=aarch64-apple-darwin ;;
+    Windows-x86_64)
+        target="$ARCH"-pc-windows-msvc
+        export RUSTFLAGS="-C target-feature=+crt-static"
+        ;;
     *)
         printf "Unsupported OS/architecture combination: %s-%s\n" "$OS" "$ARCH" >&2
         exit 1

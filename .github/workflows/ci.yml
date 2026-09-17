@@ -12,6 +12,7 @@ concurrency:
 env:
   RUST_BACKTRACE: 1
   RUST_VERSION: 1.98.1
+  ARBTEST_BUDGET_MS: 5000
 jobs:
   ubuntu:
     runs-on: ubuntu-latest
@@ -26,9 +27,6 @@ jobs:
         run: ./ci/test.sh
   macos:
     runs-on: macos-latest
-    env:
-      # run each test for 5 seconds
-      ARBTEST_BUDGET_MS: 5000
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.4
@@ -37,6 +35,20 @@ jobs:
       - name: Install Rust
         run: ./ci/rust.sh
       - name: Test
+        run: ./ci/test.sh
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - name: Init
+        shell: bash
+        run: ./ci/init.sh
+      - name: Install Rust
+        shell: bash
+        run: ./ci/rust.sh
+      - name: Install Rust
+        shell: bash
         run: ./ci/test.sh
   build-ubuntu:
     runs-on: ubuntu-latest
@@ -74,8 +86,33 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 1
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - name: Init
+        shell: bash
+        run: ./ci/init.sh
+      - name: Build relese binaries
+        shell: bash
+        run: ./ci/build.sh
+      - name: Upload archives as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stuckliste-windows
+          path: stuckliste-${{ env.OS }}-${{ env.ARCH }}-${{ env.VERSION }}.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
   publish:
-    needs: [ubuntu, macos, build-ubuntu, build-macos]
+    needs:
+      - ubuntu
+      - macos
+      - windows
+      - build-ubuntu
+      - build-macos
+      - build-windows
     if: github.ref_type == 'tag'
     permissions:
       contents: write
@@ -96,6 +133,10 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: stuckliste-macos
+      - name: Download Windows binaries
+        uses: actions/download-artifact@v5
+        with:
+          name: stuckliste-windows
       - name: List files
         run: ls -l *.tar.gz
       - name: Create release
@@ -119,4 +160,11 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: stuckliste-Darwin-arm64-${{ env.VERSION }}.tar.gz
           asset_name: stuckliste-Darwin-arm64-${{ env.VERSION }}.tar.gz
+          asset_content_type: application/gzip
+      - name: Upload Windows binaries
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: stuckliste-Windows-x86_64-${{ env.VERSION }}.tar.gz
+          asset_name: stuckliste-Windows-x86_64-${{ env.VERSION }}.tar.gz
           asset_content_type: application/gzip
