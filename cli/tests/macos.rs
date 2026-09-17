@@ -1,6 +1,7 @@
-use std::fs::create_dir_all;
+use std::fs::create_dir;
 use std::fs::remove_file;
 use std::fs::File;
+use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
 
@@ -52,25 +53,63 @@ fn compare_mkbom_s() {
 )]
 #[test]
 fn compare_lsbom_directory_before_sibling() {
+    check_bfs(["a", "b"]);
+    check_bfs(["a/", "b"]);
+    check_bfs(["a", "b/"]);
+    check_bfs(["a/", "b/"]);
+    check_bfs(["a/", "b/", "c/"]);
+    check_bfs(["a/", "b", "a/c", "a/d"]);
+    check_bfs(["a", "b/", "b/c", "b/d"]);
+}
+
+fn create_fs_tree(sub_paths: impl IntoIterator<Item = impl AsRef<Path>>) -> TempDir {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    for sub_path in sub_paths.into_iter() {
+        let sub_path = sub_path.as_ref();
+        assert!(!sub_path.is_absolute(), "sub_path = {sub_path:?}");
+        let path = root.join(sub_path);
+        if path.as_os_str().as_encoded_bytes().last().copied() != Some(b'/') {
+            File::create(&path).unwrap();
+        } else {
+            create_dir(path).unwrap();
+        }
+    }
+    dir
+}
+
+fn check_bfs(sub_paths: impl IntoIterator<Item = impl AsRef<Path>>) {
+    let input_dir = create_fs_tree(sub_paths);
     let workdir = TempDir::new().unwrap();
-    let directory = workdir.path().join("root");
-    create_dir_all(directory.join("a")).unwrap();
-    File::create(directory.join("a").join("f")).unwrap();
-    File::create(directory.join("z")).unwrap();
     let bom = workdir.path().join("our.bom");
     let status = test_bin::get_test_bin!("mkbom")
-        .arg(&directory)
+        .arg(input_dir.path())
         .arg(&bom)
         .status()
         .unwrap();
     assert!(status.success());
-    let output = Command::new("lsbom").arg("-s").arg(&bom).output().unwrap();
+    let their_output = Command::new("lsbom").arg("-s").arg(&bom).output().unwrap();
     assert!(
-        output.status.success(),
+        their_output.status.success(),
         "their stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&their_output.stderr)
     );
-    similar_asserts::assert_eq!(normalize_output(&output.stdout), ".\n./a\n./a/f\n./z");
+    let our_output = test_bin::get_test_bin!("lsbom")
+        .arg("-s")
+        .arg(&bom)
+        .output()
+        .unwrap();
+    assert!(
+        our_output.status.success(),
+        "our stderr:\n{}",
+        String::from_utf8_lossy(&our_output.stderr)
+    );
+    similar_asserts::assert_eq!(
+        normalize_output(&their_output.stdout),
+        normalize_output(&our_output.stdout),
+        "our stderr:\n{}",
+        String::from_utf8_lossy(&our_output.stderr)
+    );
 }
 
 fn compare_mkbom_and_lsbom<F1, F2, F3, F4>(

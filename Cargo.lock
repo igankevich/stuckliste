@@ -447,7 +447,7 @@ dependencies = [
  "libc",
  "normalize-path",
  "random-dir",
- "walkdir",
+ "tempfile",
 ]
 
 [[package]]
