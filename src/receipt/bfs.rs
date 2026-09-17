@@ -10,6 +10,14 @@ pub struct DirEntry {
 
 pub fn bfs(path: PathBuf) -> std::io::Result<Vec<DirEntry>> {
     let mut entries = Vec::new();
+    let root_kind = std::fs::metadata(&path)?.file_type();
+    entries.push(DirEntry {
+        kind: root_kind,
+        path: path.clone(),
+    });
+    if !root_kind.is_dir() {
+        return Ok(entries);
+    }
     let mut queue = VecDeque::new();
     queue.push_back(path);
     while let Some(path) = queue.pop_front() {
