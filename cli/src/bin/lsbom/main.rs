@@ -106,7 +106,6 @@ fn do_main() -> Result<ExitCode, Error> {
 }
 
 fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
-    use std::fmt::Write;
     let file = File::open(path)?;
     let bom = Receipt::read(file)?;
     let entries = bom.entries()?;
@@ -114,131 +113,121 @@ fn print_bom(path: &Path, args: &Args) -> Result<(), Error> {
     let mut line = String::with_capacity(4096);
     for (path, metadata) in entries.iter() {
         line.clear();
-        let print = match &metadata {
-            Metadata::File(file) if list.contains(List::Files) => {
-                write_common(&mut line, path, metadata, args.paths_only, false)?;
-                write!(&mut line, "\t{}\t{}", metadata.size(), file.checksum())
-                    .map_err(Error::other)?;
+        let print = write_entry(&mut line, path, metadata, args, &list)?;
+        if print {
+            println!("{line}");
+        }
+    }
+    Ok(())
+}
+
+#[inline]
+fn write_entry(
+    line: &mut String,
+    path: &Path,
+    metadata: &Metadata,
+    args: &Args,
+    list: &List,
+) -> Result<bool, Error> {
+    use std::fmt::Write;
+    match &metadata {
+        Metadata::File(file) if list.contains(List::Files) => {
+            let _ = write!(line, "{}", path.display());
+            if !args.paths_only {
+                write_common(line, metadata, false);
+                write!(line, "\t{}\t{}", metadata.size(), file.checksum()).map_err(Error::other)?;
                 if args.print_mtime {
                     let timestamp: DateTime<Local> =
                         metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
-                    write!(&mut line, "\t{}", timestamp.format(LSBOM_TIME))
-                        .map_err(Error::other)?;
+                    write!(line, "\t{}", timestamp.format(LSBOM_TIME)).map_err(Error::other)?;
                 }
-                true
             }
-            Metadata::Executable(exe) if list.contains(List::Files) => {
-                let mut print = false;
-                write_common(&mut line, path, metadata, args.paths_only, false)?;
-                match args.arch {
-                    Some(ref arch) => {
-                        let cpu_type = arch_to_cpu_type(arch)?;
-                        for arch in exe.arches().iter() {
-                            if cpu_type == arch.cpu_type() {
-                                write!(&mut line, "\t{}\t{}", arch.size(), arch.checksum())
-                                    .map_err(Error::other)?;
-                                print = true;
-                                break;
-                            }
-                        }
-                    }
-                    None => {
-                        write!(&mut line, "\t{}\t{}", metadata.size(), exe.checksum())
-                            .map_err(Error::other)?;
-                        print = true;
-                    }
+            Ok(true)
+        }
+        Metadata::Executable(exe) if list.contains(List::Files) => {
+            let _ = write!(line, "{}", path.display());
+            let cpu_type = args
+                .arch
+                .as_ref()
+                .map(|arch| arch_to_cpu_type(arch))
+                .transpose()?;
+            let arch = cpu_type
+                .and_then(|cpu_type| exe.arches().iter().find(|arch| arch.cpu_type() == cpu_type));
+            let print = cpu_type.is_none() || arch.is_some();
+            if !args.paths_only {
+                write_common(line, metadata, false);
+                if let Some(arch) = arch {
+                    let _ = write!(line, "\t{}\t{}", arch.size(), arch.checksum());
+                } else if cpu_type.is_none() {
+                    let _ = write!(line, "\t{}\t{}", metadata.size(), exe.checksum());
                 }
                 if print && args.print_mtime {
                     let timestamp: DateTime<Local> =
                         metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
-                    write!(&mut line, "\t{}", timestamp.format(LSBOM_TIME))
-                        .map_err(Error::other)?;
+                    write!(line, "\t{}", timestamp.format(LSBOM_TIME)).map_err(Error::other)?;
                 }
-                print
             }
-            Metadata::Link(link) if list.contains(List::Symlinks) => {
-                write_common(
-                    &mut line,
-                    path,
-                    metadata,
-                    args.paths_only,
-                    args.exclude_modes,
-                )?;
+            Ok(print)
+        }
+        Metadata::Link(link) if list.contains(List::Symlinks) => {
+            let _ = write!(line, "{}", path.display());
+            if !args.paths_only {
+                write_common(line, metadata, args.exclude_modes);
                 write!(
-                    &mut line,
+                    line,
                     "\t{}\t{}\t{}",
                     metadata.size(),
                     link.checksum(),
                     link.target().display()
                 )
                 .map_err(Error::other)?;
-                true
             }
-            Metadata::Device(dev) => {
-                let file_type = FileType::new(metadata.mode())?;
-                let print = match file_type {
-                    FileType::BlockDevice if list.contains(List::BlockDevices) => true,
-                    FileType::CharDevice if list.contains(List::CharDevices) => true,
-                    _ => false,
-                };
-                if print {
-                    write_common(&mut line, path, metadata, args.paths_only, false)?;
-                    write!(&mut line, "\t{}", dev.rdev()).map_err(Error::other)?;
-                }
-                print
-            }
-            Metadata::Entry(..) => {
-                write!(&mut line, "{}", path.display()).map_err(Error::other)?;
-                true
-            }
-            Metadata::Directory(..) if list.contains(List::Directories) => {
-                write_common(
-                    &mut line,
-                    path,
-                    metadata,
-                    args.paths_only,
-                    args.exclude_modes,
-                )?;
-                true
-            }
-            _ => false,
-        };
-        if print {
-            println!("{}", line);
+            Ok(true)
         }
+        Metadata::Device(dev) => {
+            let file_type = FileType::new(metadata.mode())?;
+            let print = match file_type {
+                FileType::BlockDevice if list.contains(List::BlockDevices) => true,
+                FileType::CharDevice if list.contains(List::CharDevices) => true,
+                _ => false,
+            };
+            if print {
+                let _ = write!(line, "{}", path.display());
+                if !args.paths_only {
+                    write_common(line, metadata, false);
+                    write!(line, "\t{}", dev.rdev()).map_err(Error::other)?;
+                }
+            }
+            Ok(print)
+        }
+        Metadata::Entry(..) => {
+            write!(line, "{}", path.display()).map_err(Error::other)?;
+            Ok(true)
+        }
+        Metadata::Directory(..) if list.contains(List::Directories) => {
+            let _ = write!(line, "{}", path.display());
+            if !args.paths_only {
+                write_common(line, metadata, args.exclude_modes);
+            }
+            Ok(true)
+        }
+        _ => Ok(false),
     }
-    Ok(())
 }
 
-fn write_common(
-    line: &mut String,
-    path: &Path,
-    metadata: &Metadata,
-    path_only: bool,
-    exclude_modes: bool,
-) -> Result<(), Error> {
+fn write_common(line: &mut String, metadata: &Metadata, exclude_modes: bool) {
     use std::fmt::Write;
-    if path_only {
-        write!(line, "{}", path.display())
-    } else if exclude_modes {
-        write!(
-            line,
-            "{}\t{}/{}",
-            path.display(),
-            metadata.uid(),
-            metadata.gid()
-        )
+    if exclude_modes {
+        let _ = write!(line, "\t{}/{}", metadata.uid(), metadata.gid());
     } else {
-        write!(
+        let _ = write!(
             line,
-            "{}\t{:o}\t{}/{}",
-            path.display(),
+            "\t{:o}\t{}/{}",
             metadata.mode(),
             metadata.uid(),
             metadata.gid()
-        )
+        );
     }
-    .map_err(Error::other)
 }
 
 bitflags! {
