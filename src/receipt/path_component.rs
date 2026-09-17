@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::ffi::OsStr;
 use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -183,7 +181,22 @@ impl PathComponentVec {
             let Some(node) = self.components.get(i as usize) else {
                 break;
             };
-            let name = OsStr::from_bytes(node.name.to_bytes());
+            let name = {
+                #[cfg(unix)]
+                {
+                    use std::ffi::OsStr;
+                    use std::os::unix::ffi::OsStrExt;
+                    Path::new(OsStr::from_bytes(node.name.to_bytes()))
+                }
+                #[cfg(not(unix))]
+                {
+                    let name_str = node
+                        .name
+                        .to_str()
+                        .map_err(|_| Error::other("Non-UTF-8 file name"))?;
+                    Path::new(name_str)
+                }
+            };
             components.push(name);
             seq_no = node.parent;
         }
@@ -233,8 +246,8 @@ impl PathComponentVec {
                 None => 0,
             };
             let name = match basename {
-                Some(s) => s.as_bytes(),
-                None => relative_path.as_os_str().as_bytes(),
+                Some(s) => s.as_encoded_bytes(),
+                None => relative_path.as_os_str().as_encoded_bytes(),
             };
             let name = CString::new(name).map_err(|_| Error::other("invalid c-string"))?;
             let node = PathComponent {
@@ -341,9 +354,9 @@ mod tests {
                 .file_types([
                     Regular,
                     Directory,
-                    #[cfg(not(target_os = "macos"))]
+                    #[cfg(target_os = "linux")]
                     BlockDevice,
-                    #[cfg(not(target_os = "macos"))]
+                    #[cfg(target_os = "linux")]
                     CharDevice,
                     Symlink,
                     HardLink,

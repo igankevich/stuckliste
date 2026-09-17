@@ -109,6 +109,10 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "linux")),
+        ignore = "Only MacOS/Linux have `cksum`"
+    )]
     #[test]
     fn compare_to_cksum() {
         arbtest(|u| {

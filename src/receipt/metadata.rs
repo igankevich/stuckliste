@@ -1,5 +1,4 @@
 use std::ffi::CString;
-use std::ffi::OsStr;
 use std::fs::read_link;
 use std::io::Cursor;
 use std::io::Error;
@@ -7,7 +6,6 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -168,7 +166,7 @@ impl Metadata {
                 ..
             }) => {
                 *target = read_link(path)?;
-                let crc_reader = CrcReader::new(target.as_os_str().as_bytes());
+                let crc_reader = CrcReader::new(target.as_os_str().as_encoded_bytes());
                 *checksum = crc_reader.digest()?;
             }
             _ => {}
@@ -324,11 +322,25 @@ impl Metadata {
                 reader.read_exact(&mut target[..])?;
                 let target = CString::from_vec_with_nul(target)
                     .map_err(|_| Error::other("invalid c-string"))?;
-                let target = OsStr::from_bytes(target.to_bytes());
+                let target = {
+                    #[cfg(unix)]
+                    {
+                        use std::ffi::OsStr;
+                        use std::os::unix::ffi::OsStrExt;
+                        OsStr::from_bytes(target.to_bytes()).into()
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        target
+                            .into_string()
+                            .map_err(|_| Error::other("Non-UTF-8 path"))?
+                            .into()
+                    }
+                };
                 Metadata::Link(Link {
                     common,
                     checksum,
-                    target: target.into(),
+                    target,
                 })
             }
             (FileType::CharDevice | FileType::BlockDevice, executable_type) => {
@@ -383,7 +395,7 @@ impl Metadata {
             }) => {
                 common.write_be(writer.by_ref())?;
                 checksum.write_be(writer.by_ref())?;
-                let name_bytes = target.as_os_str().as_bytes();
+                let name_bytes = target.as_os_str().as_encoded_bytes();
                 // +1 because of the nul byte
                 ((name_bytes.len() + 1) as u32).write_be(writer.by_ref())?;
                 writer.write_all(name_bytes)?;
@@ -441,6 +453,8 @@ impl BlockWrite<Context> for Metadata {
 
 impl TryFrom<std::fs::Metadata> for Metadata {
     type Error = Error;
+
+    #[cfg(unix)]
     fn try_from(other: std::fs::Metadata) -> Result<Self, Self::Error> {
         use std::os::unix::fs::MetadataExt;
         let kind: FileType = other.file_type().try_into()?;
@@ -466,6 +480,49 @@ impl TryFrom<std::fs::Metadata> for Metadata {
                 common,
                 dev: other.rdev() as i32,
             }),
+        };
+        Ok(metadata)
+    }
+
+    #[cfg(not(unix))]
+    fn try_from(other: std::fs::Metadata) -> Result<Self, Self::Error> {
+        let kind: FileType = other.file_type().try_into()?;
+        let mut common = Common {
+            mode: kind.to_mode_bits(),
+            uid: 0,
+            gid: 0,
+            mtime: other
+                .modified()
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .try_into()
+                .unwrap_or(0),
+            size: other.len(),
+        };
+        let metadata = match kind {
+            FileType::Regular => {
+                common.mode |= 0o644;
+                Metadata::File(File {
+                    common,
+                    checksum: 0,
+                })
+            }
+            FileType::Directory => {
+                common.mode |= 0o755;
+                Metadata::Directory(Directory { common })
+            }
+            FileType::Symlink => {
+                common.mode |= 0o777;
+                Metadata::Link(Link {
+                    common,
+                    checksum: 0,
+                    target: Default::default(),
+                })
+            }
+            // Not supported on non-UNIX systems.
+            FileType::CharDevice | FileType::BlockDevice => unreachable!(),
         };
         Ok(metadata)
     }
@@ -858,7 +915,23 @@ mod tests {
             Ok(Self {
                 common,
                 checksum: u.arbitrary()?,
-                target: OsStr::from_bytes(u.arbitrary::<CString>()?.to_bytes()).into(),
+                target: {
+                    #[cfg(unix)]
+                    {
+                        use std::ffi::OsStr;
+                        use std::os::unix::ffi::OsStrExt;
+                        OsStr::from_bytes(u.arbitrary::<CString>()?.to_bytes()).into()
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let mut target = String::new();
+                        let len = u.arbitrary_len::<char>()?;
+                        for _ in 0..len {
+                            target.push(u.int_in_range(b'a'..=b'z')?.into());
+                        }
+                        target.into()
+                    }
+                },
             })
         }
     }
