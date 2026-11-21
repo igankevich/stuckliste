@@ -222,6 +222,7 @@ impl PathComponentVec {
         override_uid: Option<u32>,
         override_gid: Option<u32>,
     ) -> Result<Self, Error> {
+        use std::path::Component::CurDir;
         let directory = directory.as_ref();
         let mut components: HashMap<PathBuf, PathComponent> = HashMap::new();
         // Id starts with 1.
@@ -232,10 +233,11 @@ impl PathComponentVec {
                 .strip_prefix(directory)
                 .map_err(Error::other)?
                 .normalize();
-            let relative_path = if entry_path == Path::new("") {
-                Path::new(".").to_path_buf()
-            } else {
-                Path::new(".").join(entry_path)
+            // Ensure each path starts with "./".
+            let relative_path = match entry_path.components().next() {
+                None => Path::new(".").to_path_buf(),
+                Some(CurDir) => entry_path,
+                Some(..) => Path::new(".").join(entry_path),
             };
             let dirname = relative_path.parent();
             let basename = relative_path.file_name();

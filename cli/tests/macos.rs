@@ -2,6 +2,7 @@ use std::fs::create_dir;
 use std::fs::remove_file;
 use std::fs::File;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Once;
 
@@ -222,6 +223,55 @@ fn random_directory(u: &mut Unstructured<'_>) -> arbitrary::Result<Dir> {
         ])
         .printable_names(true)
         .create(u)
+}
+
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn mkbom_relative_dir() {
+    let our_mkbom = || test_bin::get_test_bin!("mkbom");
+    let our_lsbom = || test_bin::get_test_bin!("lsbom");
+    let their_lsbom = || Command::new("lsbom");
+    let workdir = TempDir::new().unwrap();
+    let our_bom = workdir.path().join("our.bom");
+    let archive_dir = create_fs_tree(["a", "b", "c/"]);
+    let archive_root = archive_dir.path().to_path_buf();
+    for (current_dir, archive_dir) in [
+        (std::env::temp_dir(), archive_root.canonicalize().unwrap()),
+        (archive_root.clone(), PathBuf::from(".")),
+        (archive_root.clone(), PathBuf::from("./")),
+        (archive_root.clone(), PathBuf::from("./.")),
+        (archive_root.clone(), PathBuf::from("././")),
+        (archive_root.join("c"), PathBuf::from("..")),
+        (archive_root.join("c"), PathBuf::from("../")),
+        (archive_root.join("c"), PathBuf::from("./..")),
+        (archive_root.join("c"), PathBuf::from("./../")),
+    ] {
+        let status = our_mkbom()
+            .arg(archive_dir)
+            .arg(&our_bom)
+            .current_dir(current_dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let our_output = our_lsbom().arg(&our_bom).output().unwrap();
+        assert!(
+            our_output.status.success(),
+            "our stderr:\n{}",
+            String::from_utf8_lossy(&our_output.stderr)
+        );
+        let their_output = their_lsbom().arg(&our_bom).output().unwrap();
+        assert!(
+            their_output.status.success(),
+            "their stderr:\n{}",
+            String::from_utf8_lossy(&their_output.stderr)
+        );
+        similar_asserts::assert_eq!(
+            normalize_output(&our_output.stdout),
+            normalize_output(&their_output.stdout),
+            "our stderr:\n{}",
+            String::from_utf8_lossy(&our_output.stderr)
+        );
+    }
 }
 
 fn do_not_truncate_assertions() {
